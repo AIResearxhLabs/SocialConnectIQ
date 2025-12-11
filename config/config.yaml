@@ -1,0 +1,209 @@
+# Application Configuration
+# This file provides default values that can be overridden by environment variables
+
+environment: ${ENVIRONMENT:-development}
+
+# =============================================================================
+# MCP SERVER CONFIGURATION
+# =============================================================================
+mcp_server:
+  base_url: ${MCP_SERVER_URL:-http://3.135.209.100:3001}
+  timeout: ${MCP_SERVER_TIMEOUT:-30}
+  retry_attempts: ${MCP_SERVER_RETRY_ATTEMPTS:-3}
+  retry_delay: ${MCP_SERVER_RETRY_DELAY:-2}
+  health_check_interval: 60  # seconds
+  endpoints:
+    linkedin_auth: /api/auth/linkedin
+    linkedin_callback: /api/auth/linkedin/callback
+    linkedin_posts: /api/linkedin/posts
+    facebook_posts: /api/facebook/posts
+    twitter_posts: /api/twitter/posts
+    instagram_posts: /api/instagram/posts
+    gemini_caption: /api/gemini/caption
+    gemini_schedule: /api/gemini/schedule
+
+# =============================================================================
+# OPENAI CONFIGURATION
+# =============================================================================
+openai:
+  api_key: ${OPENAI_API_KEY}
+  org_id: ${OPENAI_ORG_ID:-}
+  model: ${OPENAI_MODEL:-gpt-4o}
+  temperature: ${OPENAI_TEMPERATURE:-0.7}
+  max_tokens: ${OPENAI_MAX_TOKENS:-2000}
+  streaming: ${AGENT_ENABLE_STREAMING:-true}
+  timeout: 60
+  # Fallback models in case primary model is unavailable
+  fallback_models:
+    - gpt-4o-mini
+    - gpt-4-turbo
+
+# =============================================================================
+# AI AGENT CONFIGURATION
+# =============================================================================
+agent:
+  max_iterations: ${AGENT_MAX_ITERATIONS:-10}
+  memory_window: ${AGENT_MEMORY_WINDOW:-10}
+  conversation_timeout: ${AGENT_CONVERSATION_TIMEOUT:-3600}
+  enable_streaming: ${AGENT_ENABLE_STREAMING:-true}
+  
+  # ReAct agent prompts
+  system_prompt: |
+    You are an intelligent social media management assistant. You help users manage their 
+    social media accounts, create engaging content, and optimize their posting strategy.
+    
+    You have access to tools that can:
+    - Authenticate with social media platforms (LinkedIn, Facebook, Twitter, Instagram)
+    - Create and schedule posts
+    - Generate engaging captions
+    - Suggest optimal posting times
+    - Analyze post performance
+    
+    Always think step-by-step and explain your reasoning. When a user asks you to do something,
+    break it down into clear steps and execute them sequentially.
+    
+    Be professional, helpful, and creative. If you're unsure about something, ask for clarification.
+  
+  # Tool configurations
+  tools:
+    - name: linkedin_authenticate
+      description: Initiate LinkedIn OAuth authentication flow
+      enabled: true
+    - name: linkedin_post
+      description: Create a post on LinkedIn
+      enabled: true
+    - name: facebook_post
+      description: Create a post on Facebook
+      enabled: true
+    - name: twitter_post
+      description: Create a post on Twitter
+      enabled: true
+    - name: instagram_post
+      description: Create a post on Instagram
+      enabled: true
+    - name: generate_caption
+      description: Generate an AI-powered caption for social media
+      enabled: true
+    - name: optimize_schedule
+      description: Suggest the best time to schedule a post
+      enabled: true
+    - name: analyze_performance
+      description: Analyze engagement metrics for a post
+      enabled: true
+
+# =============================================================================
+# DATABASE CONFIGURATION
+# =============================================================================
+database:
+  url: ${DATABASE_URL:-postgresql://localhost:5432/socialdb}
+  pool_size: ${DB_POOL_SIZE:-20}
+  max_overflow: ${DB_MAX_OVERFLOW:-10}
+  pool_pre_ping: true
+  echo: false
+  
+redis:
+  url: ${REDIS_URL:-redis://localhost:6379}
+  ttl: ${REDIS_TTL:-3600}
+  max_connections: ${REDIS_MAX_CONNECTIONS:-50}
+  decode_responses: true
+  
+  # Key prefixes
+  prefixes:
+    conversation: "conv:"
+    user_session: "session:"
+    mcp_cache: "mcp:"
+    rate_limit: "ratelimit:"
+
+# =============================================================================
+# SECURITY CONFIGURATION
+# =============================================================================
+security:
+  jwt_secret: ${JWT_SECRET}
+  jwt_algorithm: ${JWT_ALGORITHM:-HS256}
+  jwt_expiration_minutes: ${JWT_EXPIRATION_MINUTES:-60}
+  
+  cors:
+    allowed_origins: ${CORS_ORIGINS:-http://localhost:3000}
+    allow_credentials: true
+    allow_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    allow_headers: ["*"]
+  
+  rate_limiting:
+    enabled: true
+    per_user: ${RATE_LIMIT_PER_USER:-100}
+    window_minutes: ${RATE_LIMIT_WINDOW_MINUTES:-60}
+    
+  audit_logging:
+    enabled: ${ENABLE_AUDIT_LOGGING:-true}
+    log_requests: true
+    log_responses: false
+    log_ai_interactions: true
+
+# =============================================================================
+# MONITORING & OBSERVABILITY
+# =============================================================================
+monitoring:
+  cost_tracking:
+    enabled: ${ENABLE_COST_TRACKING:-true}
+    alert_threshold: 100  # USD
+    alert_email: admin@example.com
+  
+  metrics:
+    enabled: true
+    endpoint: /metrics
+    
+  logging:
+    level: ${LOG_LEVEL:-INFO}
+    format: ${LOG_FORMAT:-json}
+    output: ${LOG_OUTPUT:-stdout}
+    
+    # Structured logging fields
+    fields:
+      - timestamp
+      - level
+      - service
+      - trace_id
+      - user_id
+      - message
+      - cost
+      - tokens
+
+# =============================================================================
+# SERVICE PORTS
+# =============================================================================
+services:
+  api_gateway:
+    host: 0.0.0.0
+    port: ${API_GATEWAY_PORT:-8000}
+  auth_service:
+    host: 0.0.0.0
+    port: ${AUTH_SERVICE_PORT:-8001}
+  integration_service:
+    host: 0.0.0.0
+    port: ${INTEGRATION_SERVICE_PORT:-8002}
+  scheduling_service:
+    host: 0.0.0.0
+    port: ${SCHEDULING_SERVICE_PORT:-8003}
+  agent_service:
+    host: 0.0.0.0
+    port: ${AGENT_SERVICE_PORT:-8004}
+  analytics_service:
+    host: 0.0.0.0
+    port: ${ANALYTICS_SERVICE_PORT:-8005}
+  posting_service:
+    host: 0.0.0.0
+    port: ${POSTING_SERVICE_PORT:-8006}
+
+# =============================================================================
+# DEVELOPMENT & DEBUGGING
+# =============================================================================
+development:
+  debug_mode: ${DEBUG_MODE:-false}
+  mock_mcp_server: ${MOCK_MCP_SERVER:-false}
+  enable_profiling: ${ENABLE_PROFILING:-false}
+  reload: true
+  
+  # Mock responses for testing
+  mock_responses:
+    enabled: false
+    delay_ms: 100

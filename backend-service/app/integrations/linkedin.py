@@ -1,0 +1,513 @@
+"""
+LinkedIn OAuth integration
+"""
+from fastapi import APIRouter, HTTPException, Request, Header
+from fastapi.responses import RedirectResponse
+from pydantic import BaseModel
+from typing import Optional
+import secrets
+import httpx
+from datetime import datetime
+import sys
+import os
+
+from ..config import config
+from .storage import token_storage
+
+# Add parent directory to path for shared utilities
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
+from shared.logging_utils import CorrelationLogger
+
+
+class MCPClient:
+    """Simple MCP client for backend service"""
+    def __init__(self, base_url: str):
+        self.base_url = base_url.rstrip('/')
+        self.client = httpx.AsyncClient(timeout=30.0)
+    
+    async def handle_linkedin_callback(
+        self, 
+        code: str, 
+        user_id: str,
+        correlation_id: str = "unknown"
+    ) -> dict:
+        """Handle LinkedIn OAuth callback"""
+        logger.info(
+            "Backend Service: Calling MCP server to exchange auth code",
+            correlation_id=correlation_id,
+            user_id=user_id,
+            additional_data={"mcp_url": self.base_url}
+        )
+        
+        response = await self.client.post(
+            f"{self.base_url}/mcp/v1",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "exchangeLinkedInAuthCode",
+                    "arguments": {
+                        "code": code,
+                        "callbackUrl": os.getenv("LINKEDIN_REDIRECT_URI", "http://localhost:8000/api/integrations/linkedin/callback")
+                    }
+                }
+            }
+        )
+        response.raise_for_status()
+        result = response.json()
+        
+        # Extract result from JSON-RPC response
+        if "error" in result:
+            raise Exception(f"MCP error: {result['error'].get('message', 'Unknown error')}")
+        
+        return result.get("result", {})
+    
+    async def post_to_linkedin(
+        self,
+        content: str,
+        access_token: str,
+        user_id: str,
+        correlation_id: str = "unknown"
+    ) -> dict:
+        """Post content to LinkedIn"""
+        logger.info(
+            "Backend Service: Calling MCP server to post to LinkedIn",
+            correlation_id=correlation_id,
+            user_id=user_id
+        )
+        
+        response = await self.client.post(
+            f"{self.base_url}/mcp/v1",
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "postToLinkedIn",
+                    "arguments": {
+                        "content": content,
+                        "accessToken": access_token,
+                        "userId": user_id
+                    }
+                }
+            }
+        )
+        response.raise_for_status()
+        result = response.json()
+        
+        # Extract result from JSON-RPC response
+        if "error" in result:
+            raise Exception(f"MCP error: {result['error'].get('message', 'Unknown error')}")
+        
+        return result.get("result", {})
+
+
+logger = CorrelationLogger(
+    service_name="BACKEND-SERVICE-LINKEDIN",
+    log_file="logs/centralized.log"
+)
+
+# Initialize MCP client
+mcp_client = MCPClient(os.getenv("MCP_SERVER_URL", "http://localhost:8007"))
+
+router = APIRouter(prefix="/linkedin", tags=["LinkedIn Integration"])
+
+
+class PostRequest(BaseModel):
+    content: str
+    user_id: str
+
+
+@router.post("/auth")
+async def initiate_auth(request: Request, user_id: str = Header(..., alias="X-User-ID")):
+    """Initiate LinkedIn OAuth flow via AI Agent Service with LLM-driven MCP integration"""
+    
+    correlation_id = getattr(request.state, "correlation_id", "unknown")
+    
+    logger.info(
+        "Backend Service: Received LinkedIn auth request, delegating to Agent Service",
+        correlation_id=correlation_id,
+        user_id=user_id,
+        additional_data={"agent_service_url": config.AGENT_SERVICE_URL}
+    )
+    
+    try:
+        # Delegate to Agent Service for LLM-driven MCP interaction
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            logger.info(
+                "Backend Service: Calling Agent Service",
+                correlation_id=correlation_id,
+                user_id=user_id,
+                additional_data={"endpoint": f"{config.AGENT_SERVICE_URL}/agent/linkedin/auth"}
+            )
+            
+            response = await client.post(
+                f"{config.AGENT_SERVICE_URL}/agent/linkedin/auth",
+                json={"user_id": user_id, "action": "get_auth_url"},
+                headers={"X-Correlation-ID": correlation_id}
+            )
+            
+            response.raise_for_status()
+            result = response.json()
+            
+            logger.info(
+                f"Backend Service: Agent Service responded successfully",
+                correlation_id=correlation_id,
+                user_id=user_id,
+                additional_data={
+                    "status_code": response.status_code,
+                    "success": result.get("success", False)
+                }
+            )
+            
+            # Extract auth_url from agent response
+            if not result.get("success"):
+                error_msg = result.get("error", "Unknown error from Agent Service")
+                logger.error(
+                    f"Backend Service: Agent Service returned error",
+                    correlation_id=correlation_id,
+                    user_id=user_id,
+                    additional_data={"error": error_msg}
+                )
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Agent Service error: {error_msg}"
+                )
+            
+            auth_url = result.get("auth_url")
+            state = result.get("state")
+            
+            if not auth_url:
+                logger.error(
+                    "Backend Service: No auth_url in Agent Service response",
+                    correlation_id=correlation_id,
+                    user_id=user_id,
+                    additional_data={"result": result}
+                )
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to get LinkedIn auth URL from Agent Service"
+                )
+            
+            # Extract state from URL if not provided separately
+            if not state and auth_url:
+                from urllib.parse import urlparse, parse_qs
+                parsed_url = urlparse(auth_url)
+                query_params = parse_qs(parsed_url.query)
+                state = query_params.get('state', [None])[0]
+            
+            if not state:
+                logger.error(
+                    "Backend Service: No state parameter in auth URL",
+                    correlation_id=correlation_id,
+                    user_id=user_id,
+                    additional_data={"auth_url": auth_url[:100]}
+                )
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to extract state parameter from auth URL"
+                )
+            
+            logger.info(
+                "Backend Service: Saving OAuth state to Firestore",
+                correlation_id=correlation_id,
+                user_id=user_id,
+                additional_data={
+                    "state_prefix": state[:12],
+                    "state_suffix": state[-12:]
+                }
+            )
+            
+            # Save state to Firestore for validation during callback
+            state_saved = await token_storage.save_oauth_state(
+                state=state,
+                user_id=user_id,
+                platform="linkedin",
+                correlation_id=correlation_id
+            )
+            
+            if not state_saved:
+                logger.warning(
+                    "Backend Service: Failed to save OAuth state to Firestore (continuing anyway)",
+                    correlation_id=correlation_id,
+                    user_id=user_id
+                )
+            else:
+                logger.success(
+                    "Backend Service: OAuth state saved successfully",
+                    correlation_id=correlation_id,
+                    user_id=user_id
+                )
+            
+            logger.success(
+                "Backend Service: Successfully obtained LinkedIn auth URL via Agent Service",
+                correlation_id=correlation_id,
+                user_id=user_id,
+                additional_data={"has_state": bool(state)}
+            )
+            
+            return {"auth_url": auth_url}
+        
+    except httpx.HTTPStatusError as e:
+        logger.error(
+            f"Backend Service: Agent Service HTTP error: {e.response.status_code}",
+            correlation_id=correlation_id,
+            user_id=user_id,
+            additional_data={
+                "status_code": e.response.status_code,
+                "response": e.response.text[:200]
+            }
+        )
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail=f"Agent Service error: {e.response.text}"
+        )
+    except httpx.RequestError as e:
+        logger.error(
+            f"Backend Service: Failed to connect to Agent Service: {str(e)}",
+            correlation_id=correlation_id,
+            user_id=user_id,
+            additional_data={"error": str(e), "agent_url": config.AGENT_SERVICE_URL}
+        )
+        raise HTTPException(
+            status_code=503,
+            detail=f"Failed to connect to Agent Service at {config.AGENT_SERVICE_URL}: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(
+            f"Backend Service: Unexpected error: {str(e)}",
+            correlation_id=correlation_id,
+            user_id=user_id,
+            additional_data={"error": str(e)}
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal error: {str(e)}"
+        )
+
+
+@router.get("/callback")
+async def handle_callback(request: Request, code: str, state: Optional[str] = None):
+    """Handle LinkedIn OAuth callback using MCP container"""
+    
+    correlation_id = getattr(request.state, "correlation_id", "unknown")
+    
+    logger.info(
+        "Backend Service: LinkedIn callback received",
+        correlation_id=correlation_id,
+        additional_data={
+            "has_code": bool(code),
+            "has_state": bool(state),
+            "state_preview": state[:20] if state else None
+        }
+    )
+    
+    try:
+        # Validate state and get user_id
+        if not state:
+            logger.error(
+                "Backend Service: Missing state parameter in callback",
+                correlation_id=correlation_id
+            )
+            # Redirect to OAuth callback page with error
+            return RedirectResponse(
+                url=f"{config.FRONTEND_URL}/oauth-callback.html?status=error&platform=linkedin&message=missing_state"
+            )
+        
+        logger.info(
+            "Backend Service: Validating OAuth state",
+            correlation_id=correlation_id,
+            additional_data={"state_prefix": state[:12], "state_suffix": state[-12:]}
+        )
+        
+        state_data = await token_storage.validate_oauth_state(state, correlation_id)
+        
+        if not state_data:
+            logger.error(
+                "Backend Service: Invalid or expired OAuth state",
+                correlation_id=correlation_id,
+                additional_data={"state": state[:20]}
+            )
+            # Redirect to OAuth callback page with error
+            return RedirectResponse(
+                url=f"{config.FRONTEND_URL}/oauth-callback.html?status=error&platform=linkedin&message=invalid_state"
+            )
+        
+        user_id = state_data.get('user_id')
+        
+        logger.info(
+            "Backend Service: OAuth state validated successfully",
+            correlation_id=correlation_id,
+            user_id=user_id
+        )
+        
+        # Use MCP server to handle the callback and exchange code for tokens
+        logger.info(
+            "Backend Service: Exchanging OAuth code for tokens via MCP",
+            correlation_id=correlation_id,
+            user_id=user_id
+        )
+        
+        result = await mcp_client.handle_linkedin_callback(
+            code=code,
+            user_id=user_id,
+            correlation_id=correlation_id
+        )
+        
+        logger.info(
+            "Backend Service: Token exchange successful",
+            correlation_id=correlation_id,
+            user_id=user_id
+        )
+        
+        # Extract token data from MCP response
+        access_token = result.get("accessToken") or result.get("access_token")
+        refresh_token = result.get("refreshToken") or result.get("refresh_token", "")
+        expires_in = result.get("expiresIn") or result.get("expires_in", 5184000)
+        platform_user_id = result.get("platformUserId") or result.get("platform_user_id", "")
+        
+        if not access_token:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to get access token from MCP container"
+            )
+        
+        # Prepare token data for storage
+        token_storage_data = {
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "expires_at": datetime.utcnow().timestamp() + expires_in,
+            "platform_user_id": platform_user_id,
+        }
+        
+        # Save tokens to Firestore
+        await token_storage.save_tokens(
+            user_id=user_id,
+            platform="linkedin",
+            token_data=token_storage_data,
+            correlation_id=correlation_id
+        )
+        
+        # Redirect to OAuth callback page with success message
+        return RedirectResponse(
+            url=f"{config.FRONTEND_URL}/oauth-callback.html?status=success&platform=linkedin"
+        )
+        
+    except httpx.HTTPStatusError as e:
+        # Redirect to OAuth callback page with error
+        return RedirectResponse(
+            url=f"{config.FRONTEND_URL}/oauth-callback.html?status=error&platform=linkedin&message=mcp_error"
+        )
+    except httpx.RequestError as e:
+        # Redirect to OAuth callback page with error
+        return RedirectResponse(
+            url=f"{config.FRONTEND_URL}/oauth-callback.html?status=error&platform=linkedin&message=connection_error"
+        )
+    except Exception as e:
+        # Redirect to OAuth callback page with error
+        return RedirectResponse(
+            url=f"{config.FRONTEND_URL}/oauth-callback.html?status=error&platform=linkedin&message=unknown_error"
+        )
+
+
+@router.get("/status")
+async def check_status(request: Request, user_id: str = Header(..., alias="X-User-ID")):
+    """Check LinkedIn connection status for a user"""
+    
+    correlation_id = getattr(request.state, "correlation_id", "unknown")
+    
+    tokens = await token_storage.get_tokens(
+        user_id=user_id,
+        platform="linkedin",
+        correlation_id=correlation_id
+    )
+    
+    if tokens and tokens.get('connected'):
+        return {
+            "connected": True,
+            "connected_at": tokens.get('connected_at'),
+            "platform_user_id": tokens.get('platform_user_id', '')
+        }
+    
+    return {"connected": False}
+
+
+@router.post("/post")
+async def post_content(request: Request, post_request: PostRequest):
+    """Post content to LinkedIn using stored tokens"""
+    
+    correlation_id = getattr(request.state, "correlation_id", "unknown")
+    
+    # Get user's LinkedIn tokens
+    tokens = await token_storage.get_tokens(
+        user_id=post_request.user_id,
+        platform="linkedin",
+        correlation_id=correlation_id
+    )
+    
+    if not tokens or not tokens.get('access_token'):
+        raise HTTPException(
+            status_code=401,
+            detail="LinkedIn not connected. Please authenticate first."
+        )
+    
+    try:
+        logger.info(
+            "Backend Service: Posting to LinkedIn via MCP",
+            correlation_id=correlation_id,
+            user_id=post_request.user_id
+        )
+        
+        # Call MCP server to post to LinkedIn
+        result = await mcp_client.post_to_linkedin(
+            content=post_request.content,
+            access_token=tokens.get('access_token'),
+            user_id=post_request.user_id,
+            correlation_id=correlation_id
+        )
+        
+        logger.success(
+            "Backend Service: LinkedIn post successful",
+            correlation_id=correlation_id,
+            user_id=post_request.user_id
+        )
+        
+        return result
+        
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 401:
+            raise HTTPException(
+                status_code=401,
+                detail="LinkedIn token expired. Please re-authenticate."
+            )
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail=f"Failed to post to LinkedIn: {e.response.text}"
+        )
+    except httpx.RequestError as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Error connecting to MCP server: {str(e)}"
+        )
+
+
+@router.delete("/disconnect")
+async def disconnect(request: Request, user_id: str = Header(..., alias="X-User-ID")):
+    """Disconnect LinkedIn integration"""
+    
+    correlation_id = getattr(request.state, "correlation_id", "unknown")
+    
+    success = await token_storage.disconnect_platform(
+        user_id=user_id,
+        platform="linkedin",
+        correlation_id=correlation_id
+    )
+    
+    if not success:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to disconnect LinkedIn"
+        )
+    
+    return {"message": "LinkedIn disconnected successfully"}

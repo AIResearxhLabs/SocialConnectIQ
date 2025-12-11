@@ -1,0 +1,14 @@
+fastapi
+uvicorn[standard]
+httpx
+firebase-admin
+python-dotenv
+pydantic
+
+# Testing dependencies
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+pytest-mock>=3.11.0
+pytest-timeout>=2.1.0
+pytest-html>=3.2.0

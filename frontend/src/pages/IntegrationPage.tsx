@@ -25,6 +25,7 @@ import {
   authenticateTwitter,
   getAllIntegrationsStatus,
   disconnectLinkedIn,
+  disconnectTwitter,
 } from '../api/social';
 
 interface IntegrationStatus {
@@ -82,6 +83,7 @@ const IntegrationPage: React.FC = () => {
       icon: <Twitter sx={{ fontSize: 40 }} />,
       color: '#1DA1F2',
       authenticateFn: authenticateTwitter,
+      disconnectFn: disconnectTwitter,
     },
   ];
 

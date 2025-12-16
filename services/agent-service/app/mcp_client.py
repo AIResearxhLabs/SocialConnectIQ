@@ -30,15 +30,30 @@ class MCPClient:
         """Close the HTTP client"""
         await self.client.aclose()
     
+    async def refresh_tools_cache(self) -> Dict[str, Any]:
+        """
+        Force refresh the tools cache from MCP server
+        Returns: Dictionary of available tools with their schemas
+        """
+        logger.info("Force refreshing MCP tools cache")
+        self.tools_cache = None
+        return await self.discover_tools()
+    
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10)
     )
-    async def discover_tools(self) -> Dict[str, Any]:
+    async def discover_tools(self, force_refresh: bool = False) -> Dict[str, Any]:
         """
         Discover available tools from MCP server
+        Args:
+            force_refresh: If True, bypass cache and fetch fresh tools
         Returns: Dictionary of available tools with their schemas
         """
+        if force_refresh:
+            logger.info("Force refresh requested - clearing cache")
+            self.tools_cache = None
+        
         try:
             logger.info(f"Discovering tools from MCP server: {self.mcp_server_url}/mcp/tools")
             response = await self.client.get(f"{self.mcp_server_url}/mcp/tools")
@@ -58,6 +73,10 @@ class MCPClient:
             else:
                 logger.warning(f"Unexpected tools data format: {type(tools_data)}")
                 self.tools_cache = {'tools': []}
+            
+            # Log all discovered tool names
+            tool_names = [tool.get('name') for tool in self.tools_cache.get('tools', [])]
+            logger.info(f"Available MCP tools: {tool_names}")
             
             return self.tools_cache
             
@@ -363,6 +382,130 @@ class MCPClient:
         """
         return await self.invoke_tool(
             tool_name="postToLinkedIn",
+            parameters={
+                "content": content,
+                "accessToken": access_token,
+                "userId": user_id
+            },
+            correlation_id=correlation_id,
+            user_id=user_id
+        )
+    
+    async def get_twitter_auth_url(self, user_id: str, correlation_id: str = "unknown", callback_url: str = None) -> Dict[str, Any]:
+        """
+        Get Twitter OAuth authorization URL with correlation tracking
+        Args:
+            user_id: User identifier
+            correlation_id: Correlation ID for request tracing
+            callback_url: Optional callback URL to override MCP server default
+        Returns: Dict containing auth_url and state
+        """
+        import os
+        start_time = time.time()
+        
+        # Get callback URL from environment if not provided
+        if not callback_url:
+            callback_url = os.getenv("TWITTER_REDIRECT_URI", "http://localhost:8000/api/integrations/twitter/callback")
+        
+        logger.info(
+            f"MCP Client: Calling getTwitterAuthUrl tool | "
+            f"correlation_id={correlation_id} | user_id={user_id} | "
+            f"callback_url={callback_url} | "
+            f"mcp_url={self.mcp_server_url}"
+        )
+        
+        try:
+            # Pass callbackUrl parameter to MCP server (as per MCP schema)
+            parameters = {
+                "callbackUrl": callback_url
+            }
+            
+            result = await self.invoke_tool(
+                tool_name="getTwitterAuthUrl",
+                parameters=parameters,
+                correlation_id=correlation_id,
+                user_id=user_id
+            )
+            
+            elapsed = time.time() - start_time
+            logger.info(
+                f"MCP Client: getTwitterAuthUrl completed in {elapsed:.2f}s | "
+                f"correlation_id={correlation_id} | "
+                f"has_auth_url={'auth_url' in result or 'authUrl' in result}"
+            )
+            
+            return result
+            
+        except Exception as e:
+            elapsed = time.time() - start_time
+            logger.error(
+                f"MCP Client: getTwitterAuthUrl failed after {elapsed:.2f}s | "
+                f"correlation_id={correlation_id} | error={str(e)}"
+            )
+            raise
+    
+    async def handle_twitter_callback(
+        self, 
+        code: str, 
+        user_id: str,
+        code_verifier: str,
+        callback_url: str = None,
+        correlation_id: str = "unknown"
+    ) -> Dict[str, Any]:
+        """
+        Handle Twitter OAuth callback and exchange code for tokens
+        Args:
+            code: Authorization code from Twitter
+            user_id: User identifier
+            code_verifier: PKCE code verifier from auth URL generation
+            callback_url: Optional callback URL (must match the one used in auth URL)
+            correlation_id: Correlation ID for request tracing
+        Returns: Dict containing access tokens and user info
+        """
+        import os
+        
+        # Get callback URL from environment if not provided
+        if not callback_url:
+            callback_url = os.getenv("TWITTER_REDIRECT_URI", "http://localhost:8000/api/integrations/twitter/callback")
+        
+        logger.info(
+            f"MCP Client: Calling exchangeTwitterAuthCode tool | "
+            f"correlation_id={correlation_id} | user_id={user_id} | "
+            f"has_code_verifier={bool(code_verifier)}"
+        )
+        
+        # Pass code, codeVerifier, and callbackUrl to MCP server
+        parameters = {
+            "code": code,
+            "codeVerifier": code_verifier,
+            "callbackUrl": callback_url
+        }
+        
+        return await self.invoke_tool(
+            tool_name="exchangeTwitterAuthCode",
+            parameters=parameters,
+            correlation_id=correlation_id,
+            user_id=user_id
+        )
+    
+    async def post_to_twitter(
+        self, 
+        content: str, 
+        access_token: str, 
+        user_id: str,
+        correlation_id: str = "unknown"
+    ) -> Dict[str, Any]:
+        """
+        Post content to Twitter
+        Args:
+            content: Content to post (tweet text)
+            access_token: Twitter access token
+            user_id: User identifier
+            correlation_id: Correlation ID for request tracing
+        Returns: Post result
+        """
+        return await self.invoke_tool(
+            tool_name="postToTwitter",
             parameters={
                 "content": content,
                 "accessToken": access_token,

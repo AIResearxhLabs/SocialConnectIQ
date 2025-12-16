@@ -71,7 +71,9 @@ async def root():
 
 # Service URLs
 AUTH_SERVICE_URL = "http://localhost:8001"
-INTEGRATION_SERVICE_URL = "http://localhost:8002"
+INTEGRATION_SERVICE_URL = "http://localhost:8002"  # Integration service on port 8002
+BACKEND_SERVICE_URL = "http://localhost:8001"  # Backend service fallback
+AGENT_SERVICE_URL = "http://localhost:8006"
 
 # ============================================
 # LinkedIn Integration Routes
@@ -415,6 +417,216 @@ async def route_twitter_post(request: Request):
             return JSONResponse(content=exc.response.json() if exc.response.text else {"detail": "Service error"}, status_code=exc.response.status_code)
 
 
+@app.delete("/api/integrations/twitter/disconnect")
+async def route_twitter_disconnect(request: Request):
+    """Route Twitter disconnect to integration service"""
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.delete(
+                f"{INTEGRATION_SERVICE_URL}/api/integrations/twitter/disconnect",
+                headers={k: v for k, v in request.headers.items() if k.lower() not in ('host', 'content-length')}
+            )
+            response.raise_for_status()
+            return JSONResponse(content=response.json(), status_code=response.status_code)
+        except httpx.RequestError as exc:
+            raise HTTPException(status_code=503, detail=f"Error connecting to integration service: {exc}")
+        except httpx.HTTPStatusError as exc:
+            return JSONResponse(content=exc.response.json() if exc.response.text else {"detail": "Service error"}, status_code=exc.response.status_code)
+
+
+# ============================================
+# Preview Post Route
+# ============================================
+
+@app.post("/api/integrations/preview")
+async def route_preview_post(request: Request):
+    """Route post preview to backend service"""
+    correlation_id = getattr(request.state, 'correlation_id', 'unknown')
+    user_id = request.headers.get('x-user-id', 'unknown')
+    
+    logger.info(
+        "API Gateway: Routing preview request to Backend Service",
+        correlation_id=correlation_id,
+        user_id=user_id
+    )
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            body = await request.json()
+            headers_to_forward = {k: v for k, v in request.headers.items() if k.lower() not in ('host', 'content-length')}
+            
+            # Ensure correlation ID is forwarded
+            if 'x-correlation-id' not in headers_to_forward:
+                headers_to_forward['x-correlation-id'] = correlation_id
+            
+            response = await client.post(
+                f"{BACKEND_SERVICE_URL}/api/integrations/preview",
+                json=body,
+                headers=headers_to_forward,
+                timeout=30.0
+            )
+            
+            response.raise_for_status()
+            
+            response_data = response.json()
+            
+            logger.success(
+                "API Gateway: Preview generated successfully",
+                correlation_id=correlation_id,
+                user_id=user_id
+            )
+            
+            # Create response with correlation ID header
+            json_response = JSONResponse(content=response_data, status_code=response.status_code)
+            json_response.headers["X-Correlation-ID"] = correlation_id
+            return json_response
+            
+        except httpx.RequestError as exc:
+            logger.error(
+                f"Request error connecting to Backend Service: {str(exc)}",
+                correlation_id=correlation_id,
+                user_id=user_id
+            )
+            raise HTTPException(status_code=503, detail=f"Error connecting to backend service: {exc}")
+            
+        except httpx.HTTPStatusError as exc:
+            logger.error(
+                f"HTTP error from Backend Service",
+                correlation_id=correlation_id,
+                user_id=user_id,
+                additional_data={"status_code": exc.response.status_code}
+            )
+            return JSONResponse(
+                content=exc.response.json() if exc.response.text else {"detail": "Service error"}, 
+                status_code=exc.response.status_code
+            )
+
+
+# ============================================
+# Content Refinement Routes
+# ============================================
+
+@app.post("/api/integrations/content/refine")
+async def route_content_refine(request: Request):
+    """Route content refinement directly to Agent Service for AI-powered content enhancement"""
+    correlation_id = getattr(request.state, 'correlation_id', 'unknown')
+    user_id = request.headers.get('x-user-id', 'unknown')
+    
+    print("\n" + "="*100)
+    print("✨ [API-GATEWAY] Content Refinement Request Received from Frontend")
+    print("="*100)
+    print(f"🆔 [API-GATEWAY] Correlation ID: {correlation_id}")
+    print(f"👤 [API-GATEWAY] User ID: {user_id}")
+    print(f"📍 [API-GATEWAY] Endpoint: POST /api/integrations/content/refine")
+    
+    async with httpx.AsyncClient() as client:
+        try:
+            body = await request.json()
+            
+            # Prepare request for Agent Service
+            agent_request = {
+                "user_id": user_id,
+                "original_content": body.get('original_content'),
+                "refinement_instructions": body.get('refinement_instructions'),
+                "tone": body.get('tone'),
+                "platform": body.get('platform'),
+                "generate_alternatives": body.get('generate_alternatives', False)
+            }
+            
+            headers_to_forward = {k: v for k, v in request.headers.items() if k.lower() not in ('host', 'content-length')}
+            
+            # Ensure correlation ID is forwarded
+            if 'x-correlation-id' not in headers_to_forward:
+                headers_to_forward['x-correlation-id'] = correlation_id
+            
+            print(f"📤 [API-GATEWAY] Forwarding to Agent Service (AI Content Refinement):")
+            print(f"   ├─ Target: {AGENT_SERVICE_URL}/agent/content/refine")
+            print(f"   ├─ Original Content Length: {len(body.get('original_content', ''))} chars")
+            print(f"   ├─ Tone: {body.get('tone', 'default')}")
+            print(f"   └─ Platform: {body.get('platform', 'none')}")
+            
+            logger.info(
+                f"Forwarding content refinement request to Agent Service",
+                correlation_id=correlation_id,
+                user_id=user_id,
+                additional_data={
+                    "target_url": f"{AGENT_SERVICE_URL}/agent/content/refine",
+                    "content_length": len(body.get('original_content', '')),
+                    "tone": body.get('tone'),
+                    "platform": body.get('platform')
+                }
+            )
+            
+            response = await client.post(
+                f"{AGENT_SERVICE_URL}/agent/content/refine",
+                json=agent_request,
+                headers=headers_to_forward,
+                timeout=60.0  # Longer timeout for LLM processing
+            )
+            
+            print(f"📥 [API-GATEWAY] Response from Agent Service:")
+            print(f"   ├─ Status Code: {response.status_code}")
+            print(f"   └─ Status: {'SUCCESS' if response.status_code == 200 else 'ERROR'}")
+            
+            logger.success(
+                f"Received response from Agent Service",
+                correlation_id=correlation_id,
+                user_id=user_id,
+                additional_data={"status_code": response.status_code}
+            )
+            
+            response.raise_for_status()
+            
+            response_data = response.json()
+            
+            if response_data.get('success'):
+                print(f"✅ [API-GATEWAY] Content refinement successful")
+                print(f"   ├─ Refined Length: {len(response_data.get('refined_content', ''))} chars")
+                print(f"   └─ Suggestions: {len(response_data.get('suggestions', []))}")
+            else:
+                print(f"❌ [API-GATEWAY] Content refinement failed: {response_data.get('error')}")
+            
+            print("="*100 + "\n")
+            
+            # Create response with correlation ID header
+            json_response = JSONResponse(content=response_data, status_code=response.status_code)
+            json_response.headers["X-Correlation-ID"] = correlation_id
+            return json_response
+            
+        except httpx.RequestError as exc:
+            print(f"❌ [API-GATEWAY] Request Error:")
+            print(f"   ├─ Type: {type(exc).__name__}")
+            print(f"   └─ Message: {str(exc)}")
+            
+            logger.error(
+                f"Request error connecting to Agent Service: {str(exc)}",
+                correlation_id=correlation_id,
+                user_id=user_id,
+                additional_data={"error_type": type(exc).__name__}
+            )
+            
+            print("="*100 + "\n")
+            raise HTTPException(status_code=503, detail=f"Error connecting to agent service: {exc}")
+            
+        except httpx.HTTPStatusError as exc:
+            print(f"❌ [API-GATEWAY] HTTP Status Error:")
+            print(f"   ├─ Status Code: {exc.response.status_code}")
+            print(f"   └─ Response: {exc.response.text[:200]}")
+            
+            logger.error(
+                f"HTTP error from Agent Service",
+                correlation_id=correlation_id,
+                user_id=user_id,
+                additional_data={"status_code": exc.response.status_code, "response": exc.response.text[:200]}
+            )
+            
+            print("="*100 + "\n")
+            return JSONResponse(
+                content=exc.response.json() if exc.response.text else {"detail": "Service error"}, 
+                status_code=exc.response.status_code
+            )
+
+
 # ============================================
 # Health Check
 # ============================================
@@ -425,5 +637,7 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "api-gateway",
-        "backend_service": BACKEND_SERVICE_URL
+        "auth_service": AUTH_SERVICE_URL,
+        "integration_service": INTEGRATION_SERVICE_URL,
+        "agent_service": AGENT_SERVICE_URL
     }

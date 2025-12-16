@@ -249,7 +249,7 @@ class TokenStorage:
         platform: str,
         correlation_id: str = "unknown"
     ) -> bool:
-        """Disconnect a platform integration"""
+        """Disconnect a platform integration and clean up OAuth states"""
         if self.db is None:
             logger.warning(
                 "Firestore not initialized - cannot disconnect",
@@ -259,13 +259,47 @@ class TokenStorage:
             return False
         
         try:
+            # Step 1: Delete platform integration tokens
             user_ref = self.db.collection('users').document(user_id)
             user_ref.update({
                 f'integrations.{platform}': firestore.DELETE_FIELD
             })
             
+            logger.info(
+                f"{platform} tokens removed from user document",
+                correlation_id=correlation_id,
+                user_id=user_id,
+                additional_data={"platform": platform}
+            )
+            
+            # Step 2: Clean up any orphaned OAuth states for this user+platform
+            # This prevents auto-reconnect from stale OAuth callbacks
+            try:
+                states_ref = self.db.collection('oauth_states')
+                states_query = states_ref.where('user_id', '==', user_id).where('platform', '==', platform)
+                
+                deleted_count = 0
+                for doc in states_query.stream():
+                    doc.reference.delete()
+                    deleted_count += 1
+                
+                if deleted_count > 0:
+                    logger.info(
+                        f"Cleaned up {deleted_count} orphaned OAuth state(s) for {platform}",
+                        correlation_id=correlation_id,
+                        user_id=user_id,
+                        additional_data={"deleted_states": deleted_count}
+                    )
+            except Exception as state_error:
+                # Don't fail the disconnect if state cleanup fails
+                logger.warning(
+                    f"Failed to clean up OAuth states (non-critical): {str(state_error)}",
+                    correlation_id=correlation_id,
+                    user_id=user_id
+                )
+            
             logger.success(
-                f"{platform} disconnected",
+                f"{platform} disconnected successfully",
                 correlation_id=correlation_id,
                 user_id=user_id,
                 additional_data={"platform": platform}

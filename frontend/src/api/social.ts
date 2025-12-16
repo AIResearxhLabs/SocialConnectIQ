@@ -1,5 +1,5 @@
 import { auth } from './firebase';
-import { buildBackendUrl, API_CONFIG } from '../config/api.config';
+import { buildBackendUrl, buildGatewayUrl, API_CONFIG } from '../config/api.config';
 
 // Generate a unique correlation ID for request tracing
 const generateCorrelationId = (): string => {
@@ -32,6 +32,8 @@ const createHeaders = async (correlationId?: string) => {
 // LinkedIn Integration
 interface PostToLinkedInParams {
   content: string;
+  imageData?: string;
+  imageMimeType?: string;
 }
 
 export const postToLinkedIn = async (params: PostToLinkedInParams) => {
@@ -45,6 +47,8 @@ export const postToLinkedIn = async (params: PostToLinkedInParams) => {
     body: JSON.stringify({
       content: params.content,
       user_id: userId,
+      image_data: params.imageData,
+      image_mime_type: params.imageMimeType,
     }),
   });
 
@@ -180,6 +184,8 @@ export const getFacebookStatus = async () => {
 
 interface PostToFacebookParams {
   content: string;
+  imageData?: string;
+  imageMimeType?: string;
 }
 
 export const postToFacebook = async (params: PostToFacebookParams) => {
@@ -193,6 +199,8 @@ export const postToFacebook = async (params: PostToFacebookParams) => {
     body: JSON.stringify({
       content: params.content,
       user_id: userId,
+      image_data: params.imageData,
+      image_mime_type: params.imageMimeType,
     }),
   });
 
@@ -239,30 +247,97 @@ export const getTwitterStatus = async () => {
   return response.json();
 };
 
+export const disconnectTwitter = async () => {
+  const headers = await createHeaders();
+  
+  const url = buildBackendUrl('api/integrations/twitter/disconnect');
+  const response = await fetch(url, {
+    method: 'DELETE',
+    headers,
+  });
+  
+  if (!response.ok) {
+    throw new Error('Failed to disconnect Twitter');
+  }
+  
+  return response.json();
+};
+
 interface PostToTwitterParams {
   content: string;
+  imageData?: string;
+  imageMimeType?: string;
 }
 
 export const postToTwitter = async (params: PostToTwitterParams) => {
-  const { userId } = await getUserAuth();
-  const headers = await createHeaders();
+  const correlationId = generateCorrelationId();
+  
+  console.log('\n' + '='.repeat(80));
+  console.log(`🐦 [FRONTEND-API] Starting Twitter Post Request`);
+  console.log(`🆔 [FRONTEND-API] Correlation ID: ${correlationId}`);
+  console.log(`📝 [FRONTEND-API] Content length: ${params.content.length} chars`);
+  console.log(`🖼️  [FRONTEND-API] Has image: ${Boolean(params.imageData)}`);
+  console.log('='.repeat(80));
 
-  const url = buildBackendUrl('api/integrations/twitter/post');
-  const response = await fetch(url, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
+  try {
+    const { userId } = await getUserAuth();
+    console.log(`👤 [FRONTEND-API] User ID: ${userId}`);
+    
+    const headers = await createHeaders(correlationId);
+    console.log('🔑 [FRONTEND-API] Headers created:', {
+      ...headers,
+      Authorization: headers.Authorization ? '[PRESENT]' : '[MISSING]',
+      'X-Correlation-ID': correlationId
+    });
+
+    const url = buildBackendUrl('api/integrations/twitter/post');
+    console.log(`📍 [FRONTEND-API] POST URL: ${url}`);
+    
+    const requestBody = {
       content: params.content,
       user_id: userId,
-    }),
-  });
+      image_data: params.imageData,
+      image_mime_type: params.imageMimeType,
+    };
+    console.log(`📦 [FRONTEND-API] Request body:`, {
+      ...requestBody,
+      image_data: requestBody.image_data ? `[${requestBody.image_data.length} bytes]` : undefined
+    });
 
-  if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(errorData.detail || 'Failed to post to Twitter');
+    console.log(`⏳ [FRONTEND-API] Sending request...`);
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(requestBody),
+    });
+
+    console.log(`📦 [FRONTEND-API] Response Status: ${response.status} ${response.statusText}`);
+    console.log(`📦 [FRONTEND-API] Response OK: ${response.ok}`);
+
+    if (!response.ok) {
+      console.error('❌ [FRONTEND-API] Request failed!');
+      let errorData;
+      try {
+        errorData = await response.json();
+        console.error('❌ [FRONTEND-API] Error Data:', errorData);
+      } catch (e) {
+        const errorText = await response.text();
+        console.error('❌ [FRONTEND-API] Error Text:', errorText);
+        throw new Error(`Failed to post to Twitter: ${response.status} ${response.statusText}`);
+      }
+      throw new Error(errorData.detail || 'Failed to post to Twitter');
+    }
+
+    const result = await response.json();
+    console.log('✅ [FRONTEND-API] Twitter post successful:', result);
+    console.log('='.repeat(80) + '\n');
+    
+    return result;
+  } catch (error) {
+    console.error('❌ [FRONTEND-API] Exception in postToTwitter:', error);
+    console.log('='.repeat(80) + '\n');
+    throw error;
   }
-
-  return response.json();
 };
 
 // Generic status check for all platforms
@@ -297,5 +372,181 @@ export const getAllIntegrationsStatus = async () => {
       facebook: { connected: false },
       twitter: { connected: false },
     };
+  }
+};
+
+// Content Refinement
+interface RefineContentParams {
+  originalContent: string;
+  refinementInstructions?: string;
+  tone?: string;
+  platform?: string;
+  generateAlternatives?: boolean;
+}
+
+interface RefineContentResponse {
+  success: boolean;
+  refined_content?: string;
+  suggestions?: string[];
+  alternatives?: string[];
+  metadata?: {
+    original_length: number;
+    refined_length: number;
+    processing_time: number;
+    model: string;
+    tone?: string;
+    platform?: string;
+  };
+  error?: string;
+}
+
+export const refineContent = async (params: RefineContentParams): Promise<RefineContentResponse> => {
+  const correlationId = generateCorrelationId();
+  
+  console.log('\n' + '='.repeat(80));
+  console.log(`✨ [FRONTEND] Starting Content Refinement`);
+  console.log(`🆔 [FRONTEND] Correlation ID: ${correlationId}`);
+  console.log(`� [FRONTEND] Original length: ${params.originalContent.length} chars`);
+  console.log(`🎭 [FRONTEND] Tone: ${params.tone || 'default'}`);
+  console.log(`� [FRONTEND] Platform: ${params.platform || 'none'}`);
+  console.log('='.repeat(80));
+  
+  try {
+    const headers = await createHeaders(correlationId);
+    
+    const url = buildGatewayUrl('api/integrations/content/refine');
+    console.log(`📍 [FRONTEND] Fetching: ${url}`);
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        original_content: params.originalContent,
+        refinement_instructions: params.refinementInstructions,
+        tone: params.tone,
+        platform: params.platform,
+        generate_alternatives: params.generateAlternatives || false,
+      }),
+    });
+    
+    console.log(`📦 [FRONTEND] Response Status: ${response.status} ${response.statusText}`);
+    
+    if (!response.ok) {
+      console.error('❌ [FRONTEND] Request failed!');
+      let errorData;
+      try {
+        errorData = await response.json();
+        console.error('❌ [FRONTEND] Error Data:', errorData);
+      } catch (e) {
+        const errorText = await response.text();
+        console.error('❌ [FRONTEND] Error Text:', errorText);
+        throw new Error(`Failed to refine content: ${response.status} ${response.statusText}`);
+      }
+      throw new Error(errorData.detail || errorData.error || 'Failed to refine content');
+    }
+    
+    const data: RefineContentResponse = await response.json();
+    
+    if (data.success) {
+      console.log('✅ [FRONTEND] Content refinement successful');
+      console.log(`📏 [FRONTEND] Refined length: ${data.refined_content?.length || 0} chars`);
+      console.log(`💡 [FRONTEND] Suggestions: ${data.suggestions?.length || 0}`);
+      console.log(`🔄 [FRONTEND] Alternatives: ${data.alternatives?.length || 0}`);
+    } else {
+      console.error('❌ [FRONTEND] Content refinement failed:', data.error);
+    }
+    
+    console.log('='.repeat(80) + '\n');
+    
+    return data;
+  } catch (error) {
+    console.error('❌ [FRONTEND] Exception in refineContent:', error);
+    throw error;
+  }
+};
+
+// Preview Post
+interface PreviewPostParams {
+  content: string;
+  platforms: string[];
+  imageData?: string;
+  imageMimeType?: string;
+}
+
+interface PlatformPreview {
+  platform: string;
+  platformName: string;
+  textContent: string;
+  hasImage: boolean;
+  imagePreviewUrl?: string;
+  warning?: string;
+  canPost: boolean;
+}
+
+interface PreviewPostResponse {
+  success: boolean;
+  previews?: PlatformPreview[];
+  error?: string;
+}
+
+export const previewPost = async (params: PreviewPostParams): Promise<PreviewPostResponse> => {
+  const correlationId = generateCorrelationId();
+  
+  console.log('\n' + '='.repeat(80));
+  console.log(`🔍 [FRONTEND] Generating Post Preview`);
+  console.log(`🆔 [FRONTEND] Correlation ID: ${correlationId}`);
+  console.log(`📝 [FRONTEND] Content length: ${params.content.length} chars`);
+  console.log(`📱 [FRONTEND] Platforms: ${params.platforms.join(', ')}`);
+  console.log(`🖼️  [FRONTEND] Has image: ${Boolean(params.imageData)}`);
+  console.log('='.repeat(80));
+  
+  try {
+    const headers = await createHeaders(correlationId);
+    
+    const url = buildGatewayUrl('api/integrations/preview');
+    console.log(`📍 [FRONTEND] Fetching: ${url}`);
+    
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        content: params.content,
+        platforms: params.platforms,
+        image_data: params.imageData,
+        image_mime_type: params.imageMimeType,
+      }),
+    });
+    
+    console.log(`📦 [FRONTEND] Response Status: ${response.status} ${response.statusText}`);
+    
+    if (!response.ok) {
+      console.error('❌ [FRONTEND] Request failed!');
+      let errorData;
+      try {
+        errorData = await response.json();
+        console.error('❌ [FRONTEND] Error Data:', errorData);
+      } catch (e) {
+        const errorText = await response.text();
+        console.error('❌ [FRONTEND] Error Text:', errorText);
+        throw new Error(`Failed to generate preview: ${response.status} ${response.statusText}`);
+      }
+      throw new Error(errorData.detail || errorData.error || 'Failed to generate preview');
+    }
+    
+    const data: PreviewPostResponse = await response.json();
+    
+    if (data.success) {
+      console.log('✅ [FRONTEND] Preview generated successfully');
+      console.log(`📋 [FRONTEND] Previews: ${data.previews?.length || 0} platforms`);
+    } else {
+      console.error('❌ [FRONTEND] Preview generation failed:', data.error);
+    }
+    
+    console.log('='.repeat(80) + '\n');
+    
+    return data;
+  } catch (error) {
+    console.error('❌ [FRONTEND] Exception in previewPost:', error);
+    throw error;
   }
 };

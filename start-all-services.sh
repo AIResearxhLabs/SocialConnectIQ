@@ -42,15 +42,14 @@ mkdir -p logs
 mkdir -p backend-service/pids
 mkdir -p api-gateway/pids
 mkdir -p services/pids
-mkdir -p services/logs
 
 # Clear old logs
 echo "📝 Clearing old logs..."
 > logs/centralized.log
 > logs/api-gateway.log
 > logs/backend-service.log
-> services/logs/integration-service.log
-> services/logs/agent-service.log
+> logs/integration-service.log
+> logs/agent-service.log
 echo ""
 
 # Start Backend Service (Port 8001)
@@ -225,16 +224,16 @@ echo "  🔵 Backend:             http://localhost:8001/health"
 echo "  🔗 Integration:         http://localhost:8002/health"
 echo "  🤖 Agent:               http://localhost:8006/health"
 echo ""
-echo "📝 Logs:"
+echo "📝 Logs (Centralized in /logs):"
 echo "  📄 Centralized:         logs/centralized.log"
 echo "  🌐 API Gateway:         logs/api-gateway.log"
 echo "  🔵 Backend Service:     logs/backend-service.log"
-echo "  🔗 Integration Service: services/logs/integration-service.log"
-echo "  🤖 Agent Service:       services/logs/agent-service.log"
+echo "  🔗 Integration Service: logs/integration-service.log"
+echo "  🤖 Agent Service:       logs/agent-service.log"
 echo ""
 echo "🔧 Useful Commands:"
 echo "  View centralized logs:  tail -f logs/centralized.log"
-echo "  View all service logs:  tail -f logs/*.log services/logs/*.log"
+echo "  View all service logs:  tail -f logs/*.log"
 echo "  Stop all services:      ./stop-all-services.sh"
 echo "  Check processes:        ps aux | grep uvicorn"
 echo ""

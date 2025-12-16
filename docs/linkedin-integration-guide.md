@@ -353,6 +353,195 @@ MCP_SERVER_URL=http://3.135.209.100:3001
 
 ---
 
+---
+
+## Content Refinement & Voice Input
+
+### Overview
+
+The Composer page now includes AI-powered content refinement and voice input capabilities to help users create professional, polished posts.
+
+### Features
+
+**Voice Input (Web Speech API):**
+- 🎤 Speak your content instead of typing
+- Real-time speech-to-text transcription
+- Browser-native, no external dependencies
+- Works in Chrome, Edge, and Safari
+
+**LLM-Powered Content Refinement:**
+- ✨ AI enhancement using OpenAI GPT-4o
+- Multiple tone options (Professional, Casual, Humorous, etc.)
+- Platform-specific optimization (LinkedIn, Twitter, Facebook)
+- Intelligent suggestions and recommendations
+- Iterative refinement with voice or text instructions
+
+### Architecture
+
+```
+Frontend (ComposerPage + Voice Input)
+    ↓ [User speaks/types content]
+    ↓ [Clicks "Enhance/Refine"]
+    ↓
+API Gateway :8002
+    ↓ [Routes to /api/integrations/content/refine]
+    ↓
+Backend Service :8001
+    ↓ [Proxies to Agent Service]
+    ↓
+Agent Service :8006
+    ↓ [ContentRefinementAgent]
+    ↓
+OpenAI GPT-4o
+    ↓ [LLM processes and refines content]
+    ↓
+[Response flows back through chain]
+    ↓
+Frontend displays refined content + suggestions
+```
+
+### User Workflow
+
+1. **Input Content**: Type or click 🎤 to speak
+2. **Select Tone**: Choose desired tone (Professional, Casual, etc.)
+3. **Enhance/Refine**: Click button to process with AI
+4. **Review**: See refined version + suggestions
+5. **Iterate** (Optional): Add refinement instructions, click "Refine Again"
+6. **Post**: Select platforms and post refined content
+
+### Configuration
+
+**Prerequisites:**
+- OpenAI API key configured in Agent Service
+- All services running (API Gateway, Backend, Agent Service)
+- Modern browser for voice input (Chrome/Edge recommended)
+
+**Environment Variables:**
+```bash
+# Agent Service (.env)
+OPENAI_API_KEY=sk-proj-your-actual-key-here
+OPENAI_MODEL=gpt-4o
+```
+
+**Verify Setup:**
+```bash
+# Check Agent Service health
+curl http://localhost:8006/health
+
+# Test content refinement
+curl -X POST http://localhost:8006/agent/content/refine \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "test-user",
+    "original_content": "I think we should improve our customer service",
+    "tone": "professional"
+  }'
+```
+
+### API Endpoint
+
+**Endpoint:** `POST /api/integrations/content/refine`
+
+**Request:**
+```json
+{
+  "original_content": "string (required)",
+  "refinement_instructions": "string (optional)",
+  "tone": "professional|casual|humorous|enthusiastic|informative|neutral",
+  "platform": "linkedin|twitter|facebook",
+  "generate_alternatives": false
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "refined_content": "Enhanced professional content...",
+  "suggestions": [
+    "✅ Content looks great! Ready to post.",
+    "💡 Consider adding a call-to-action"
+  ],
+  "metadata": {
+    "original_length": 50,
+    "refined_length": 150,
+    "processing_time": 2.5,
+    "model": "gpt-4o",
+    "tone": "professional"
+  }
+}
+```
+
+### Voice Input Usage
+
+**Browser Compatibility:**
+
+| Browser | Voice Support | Status |
+|---------|--------------|--------|
+| Chrome | ✅ Full | Recommended |
+| Edge | ✅ Full | Recommended |
+| Safari | ✅ Full | Works well |
+| Firefox | ⚠️ Limited | Desktop only |
+
+**Steps:**
+1. Navigate to Composer page
+2. Click microphone button (🎤)
+3. Grant microphone permissions when prompted
+4. Speak your content clearly
+5. Click microphone again to stop recording
+6. Text appears in the text area
+
+**Troubleshooting:**
+- **"Microphone permission denied"**: Check browser settings → Privacy → Microphone
+- **"Speech recognition not supported"**: Use Chrome, Edge, or Safari
+- **"No speech detected"**: Check microphone is working, speak louder
+
+### Testing
+
+**Automated Test:**
+```bash
+# Run comprehensive test
+chmod +x scripts/test-content-refinement.sh
+./scripts/test-content-refinement.sh
+```
+
+**Manual Test:**
+```bash
+# Test via API Gateway (full E2E)
+curl -X POST http://localhost:8002/api/integrations/content/refine \
+  -H "Content-Type: application/json" \
+  -H "X-User-ID: test-user-123" \
+  -d '{
+    "original_content": "excited to announce our Q4 results",
+    "tone": "enthusiastic",
+    "platform": "linkedin"
+  }'
+```
+
+### Common Issues
+
+**1. "Content refinement agent not initialized"**
+- **Cause**: Agent Service didn't start or OpenAI key missing
+- **Solution**: 
+  ```bash
+  cd services/agent-service
+  OPENAI_API_KEY="your-key" python -m app.main
+  ```
+
+**2. "404 Not Found" on content refinement endpoint**
+- **Cause**: Services not restarted after code changes
+- **Solution**: Restart all services with `./stop-all-services.sh && ./start-all-services.sh`
+
+**3. OpenAI API Error 401**
+- **Cause**: Invalid or expired API key
+- **Solution**: Verify key at https://platform.openai.com/api-keys, update .env, restart service
+
+**4. Voice input infinite loop**
+- **Cause**: Fixed in latest version
+- **Solution**: Ensure you have latest code with fix in `VoiceInputButton.tsx`
+
+---
+
 ## Future Enhancements
 
 1. **Token Refresh**: Implement automatic token refresh before expiration
@@ -360,6 +549,8 @@ MCP_SERVER_URL=http://3.135.209.100:3001
 3. **Multi-Account**: Support multiple LinkedIn accounts per user
 4. **Analytics**: Track OAuth success rates and common failure points
 5. **Rate Limiting**: Implement per-user rate limiting for API calls
+6. **Advanced Voice**: Multi-language support, custom voice commands
+7. **Content Templates**: Pre-built templates for common post types
 
 ---
 
@@ -368,7 +559,9 @@ MCP_SERVER_URL=http://3.135.209.100:3001
 - [LinkedIn OAuth 2.0 Documentation](https://docs.microsoft.com/en-us/linkedin/shared/authentication/authentication)
 - [Firebase Admin SDK](https://firebase.google.com/docs/admin/setup)
 - [Firestore Security Rules](https://firebase.google.com/docs/firestore/security/get-started)
+- [OpenAI API Documentation](https://platform.openai.com/docs)
+- [Web Speech API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Speech_API)
 
 ---
 
-*Last Updated: November 17, 2025*
+*Last Updated: December 12, 2025*

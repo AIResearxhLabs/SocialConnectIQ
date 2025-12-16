@@ -8,12 +8,14 @@ from pydantic import BaseModel
 import logging
 import sys
 import os
-from typing import Optional
+from typing import Optional, List
 from contextlib import asynccontextmanager
 
 from .config import settings
 from .mcp_client import MCPClient
 from .linkedin_agent import LinkedInOAuthAgent
+from .twitter_agent import TwitterOAuthAgent
+from .content_agent import ContentRefinementAgent
 
 # Add parent directory to path for shared utilities
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
@@ -27,20 +29,26 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Initialize correlation logger
+# Use absolute path to project root logs directory
+_project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
+_log_file = os.path.join(_project_root, "logs", "agent-service.log")
+
 correlation_logger = CorrelationLogger(
     service_name="AGENT-SERVICE",
-    log_file="logs/agent-service.log"
+    log_file=_log_file
 )
 
 # Global instances
 mcp_client: Optional[MCPClient] = None
 linkedin_agent: Optional[LinkedInOAuthAgent] = None
+twitter_agent: Optional[TwitterOAuthAgent] = None
+content_agent: Optional[ContentRefinementAgent] = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifecycle manager for the application"""
-    global mcp_client, linkedin_agent
+    global mcp_client, linkedin_agent, twitter_agent, content_agent
     
     # Startup
     logger.info("Initializing Agent Service...")
@@ -50,9 +58,10 @@ async def lifespan(app: FastAPI):
         mcp_client = MCPClient(settings.mcp_server.base_url)
         logger.info(f"MCP Client initialized with server: {settings.mcp_server.base_url}")
         
-        # Discover available tools
-        tools = await mcp_client.discover_tools()
-        logger.info(f"Discovered {len(tools.get('tools', []))} MCP tools")
+        # Discover available tools with force refresh to get latest from MCP server
+        tools = await mcp_client.discover_tools(force_refresh=True)
+        tool_names = [tool.get('name') for tool in tools.get('tools', [])]
+        logger.info(f"Discovered {len(tools.get('tools', []))} MCP tools: {tool_names}")
         
         # Initialize LinkedIn agent
         linkedin_agent = LinkedInOAuthAgent(
@@ -60,6 +69,20 @@ async def lifespan(app: FastAPI):
             openai_api_key=settings.openai.api_key
         )
         logger.info("LinkedIn OAuth Agent initialized")
+        
+        # Initialize Twitter agent
+        twitter_agent = TwitterOAuthAgent(
+            mcp_client=mcp_client,
+            openai_api_key=settings.openai.api_key
+        )
+        logger.info("Twitter OAuth Agent initialized")
+        
+        # Initialize Content Refinement agent
+        content_agent = ContentRefinementAgent(
+            openai_api_key=settings.openai.api_key,
+            model=settings.openai.model
+        )
+        logger.info("Content Refinement Agent initialized")
         
     except Exception as e:
         logger.error(f"Failed to initialize services: {str(e)}")
@@ -99,12 +122,15 @@ class GetAuthUrlResponse(BaseModel):
     success: bool
     auth_url: Optional[str] = None
     state: Optional[str] = None
+    code_verifier: Optional[str] = None  # Required for Twitter PKCE
+    codeVerifier: Optional[str] = None  # Alternate key for compatibility
     error: Optional[str] = None
 
 
 class HandleCallbackRequest(BaseModel):
     code: str
     user_id: str
+    code_verifier: Optional[str] = None  # Required for Twitter PKCE
 
 
 class HandleCallbackResponse(BaseModel):
@@ -127,6 +153,25 @@ class PostContentResponse(BaseModel):
 
 class ToolsListResponse(BaseModel):
     tools: list
+
+
+# Content Refinement Models
+class RefineContentRequest(BaseModel):
+    user_id: str
+    original_content: str
+    refinement_instructions: Optional[str] = None
+    tone: Optional[str] = None  # professional, casual, humorous, enthusiastic, informative, neutral
+    platform: Optional[str] = None  # linkedin, twitter, facebook
+    generate_alternatives: bool = False
+
+
+class RefineContentResponse(BaseModel):
+    success: bool
+    refined_content: Optional[str] = None
+    suggestions: Optional[List[str]] = None
+    alternatives: Optional[List[str]] = None
+    metadata: Optional[dict] = None
+    error: Optional[str] = None
 
 
 # Middleware to add correlation ID
@@ -307,6 +352,8 @@ async def linkedin_auth(
             success=result["success"],
             auth_url=result.get("auth_url"),
             state=result.get("state"),
+            code_verifier=result.get("code_verifier"),
+            codeVerifier=result.get("codeVerifier"),
             error=result.get("error")
         )
         
@@ -361,6 +408,8 @@ async def linkedin_get_auth_url(request: Request, auth_request: GetAuthUrlReques
             success=result["success"],
             auth_url=result.get("auth_url"),
             state=result.get("state"),
+            code_verifier=result.get("code_verifier"),
+            codeVerifier=result.get("codeVerifier"),
             error=result.get("error")
         )
         
@@ -510,6 +559,123 @@ async def linkedin_post(request: Request, post_request: PostContentRequest):
     return await linkedin_post_content(request, post_request)
 
 
+# Twitter OAuth Endpoints
+@app.post("/agent/twitter/auth", response_model=GetAuthUrlResponse)
+async def twitter_auth(
+    request: GetAuthUrlRequest,
+    x_correlation_id: Optional[str] = Header(None, alias="X-Correlation-ID")
+):
+    """
+    Unified Twitter OAuth endpoint via AI agent with LLM-driven MCP integration
+    """
+    correlation_id = x_correlation_id or "unknown"
+    
+    try:
+        if not twitter_agent:
+            logger.error(
+                f"Agent Service: Twitter agent not initialized | correlation_id={correlation_id}"
+            )
+            raise HTTPException(status_code=503, detail="Twitter agent not initialized")
+        
+        logger.info(
+            f"Agent Service: Received Twitter auth request | "
+            f"correlation_id={correlation_id} | user_id={request.user_id}"
+        )
+        
+        # Execute agent workflow with LLM reasoning
+        result = await twitter_agent.execute({
+            "user_id": request.user_id,
+            "action": "get_auth_url",
+            "correlation_id": correlation_id
+        })
+        
+        logger.info(
+            f"Agent Service: Agent execution completed | "
+            f"correlation_id={correlation_id} | success={result['success']} | "
+            f"has_code_verifier={'code_verifier' in result or 'codeVerifier' in result}"
+        )
+        
+        return GetAuthUrlResponse(
+            success=result["success"],
+            auth_url=result.get("auth_url"),
+            state=result.get("state"),
+            code_verifier=result.get("code_verifier"),
+            codeVerifier=result.get("codeVerifier"),
+            error=result.get("error")
+        )
+        
+    except Exception as e:
+        logger.error(
+            f"Agent Service: Error in twitter_auth | "
+            f"correlation_id={correlation_id} | error={str(e)}"
+        )
+        return GetAuthUrlResponse(
+            success=False,
+            error=str(e)
+        )
+
+
+@app.post("/agent/twitter/handle-callback", response_model=HandleCallbackResponse)
+async def twitter_handle_callback(request: Request, callback_request: HandleCallbackRequest):
+    """
+    Handle Twitter OAuth callback via AI agent
+    """
+    correlation_id = getattr(request.state, "correlation_id", "unknown")
+    
+    try:
+        if not twitter_agent:
+            correlation_logger.error(
+                "Twitter agent not initialized",
+                correlation_id=correlation_id,
+                user_id=callback_request.user_id
+            )
+            raise HTTPException(status_code=503, detail="Twitter agent not initialized")
+        
+        correlation_logger.info(
+            f"Handling Twitter callback",
+            correlation_id=correlation_id,
+            user_id=callback_request.user_id,
+            additional_data={"has_code": bool(callback_request.code)}
+        )
+        
+        # Execute agent workflow (pass code_verifier for PKCE)
+        result = await twitter_agent.execute({
+            "user_id": callback_request.user_id,
+            "action": "handle_callback",
+            "code": callback_request.code,
+            "code_verifier": callback_request.code_verifier,
+            "correlation_id": correlation_id
+        })
+        
+        correlation_logger.success(
+            f"Twitter callback handled",
+            correlation_id=correlation_id,
+            user_id=callback_request.user_id,
+            additional_data={"success": result.get("success")}
+        )
+        
+        return HandleCallbackResponse(
+            success=result["success"],
+            result=result.get("result"),
+            error=result.get("error")
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in handle_callback: {str(e)}")
+        
+        correlation_logger.error(
+            f"Error in handle_callback: {str(e)}",
+            correlation_id=correlation_id,
+            user_id=callback_request.user_id,
+            additional_data={"error": str(e)}
+        )
+        
+        return HandleCallbackResponse(
+            success=False,
+            error=str(e)
+        )
+
+
 @app.post("/agent/facebook/post", response_model=PostContentResponse)
 async def facebook_post(request: Request, post_request: PostContentRequest):
     """
@@ -638,6 +804,91 @@ async def twitter_post(request: Request, post_request: PostContentRequest):
         )
 
 
+# Content Refinement Endpoint
+@app.post("/agent/content/refine", response_model=RefineContentResponse)
+async def refine_content(request: Request, refine_request: RefineContentRequest):
+    """
+    Refine content using AI-powered Content Refinement Agent
+    Enhances clarity, engagement, and platform-specific optimization
+    """
+    correlation_id = getattr(request.state, "correlation_id", "unknown")
+    
+    try:
+        if not content_agent:
+            correlation_logger.error(
+                "Content refinement agent not initialized",
+                correlation_id=correlation_id,
+                user_id=refine_request.user_id
+            )
+            raise HTTPException(status_code=503, detail="Content refinement agent not initialized")
+        
+        correlation_logger.info(
+            f"Refining content",
+            correlation_id=correlation_id,
+            user_id=refine_request.user_id,
+            additional_data={
+                "original_length": len(refine_request.original_content),
+                "tone": refine_request.tone,
+                "platform": refine_request.platform,
+                "has_instructions": bool(refine_request.refinement_instructions),
+                "generate_alternatives": refine_request.generate_alternatives
+            }
+        )
+        
+        # Call content refinement agent
+        result = await content_agent.refine_content(
+            original_content=refine_request.original_content,
+            user_id=refine_request.user_id,
+            correlation_id=correlation_id,
+            tone=refine_request.tone,
+            platform=refine_request.platform,
+            refinement_instructions=refine_request.refinement_instructions,
+            generate_alternatives=refine_request.generate_alternatives
+        )
+        
+        if result.get("success"):
+            correlation_logger.success(
+                f"Content refinement completed",
+                correlation_id=correlation_id,
+                user_id=refine_request.user_id,
+                additional_data={
+                    "refined_length": len(result.get("refined_content", "")),
+                    "suggestions_count": len(result.get("suggestions", [])),
+                    "alternatives_count": len(result.get("alternatives", []))
+                }
+            )
+        else:
+            correlation_logger.error(
+                f"Content refinement failed: {result.get('error')}",
+                correlation_id=correlation_id,
+                user_id=refine_request.user_id
+            )
+        
+        return RefineContentResponse(
+            success=result.get("success", False),
+            refined_content=result.get("refined_content"),
+            suggestions=result.get("suggestions"),
+            alternatives=result.get("alternatives"),
+            metadata=result.get("metadata"),
+            error=result.get("error")
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in content refinement: {str(e)}")
+        
+        correlation_logger.error(
+            f"Error in content refinement: {str(e)}",
+            correlation_id=correlation_id,
+            user_id=refine_request.user_id,
+            additional_data={"error": str(e)}
+        )
+        
+        return RefineContentResponse(
+            success=False,
+            error=str(e)
+        )
+
+
 # Debug Endpoints
 @app.get("/debug/mcp-logs")
 async def get_mcp_logs(request: Request, lines: int = 50):
@@ -746,6 +997,67 @@ async def test_mcp_connection(request: Request):
     except Exception as e:
         correlation_logger.error(
             f"Debug endpoint: MCP connectivity test failed: {str(e)}",
+            correlation_id=correlation_id,
+            additional_data={"error": str(e), "mcp_server": settings.mcp_server.base_url}
+        )
+        
+        return {
+            "status": "error",
+            "message": str(e),
+            "mcp_server": settings.mcp_server.base_url
+        }
+
+
+@app.post("/debug/refresh-tools")
+async def refresh_mcp_tools(request: Request):
+    """Force refresh MCP tools cache from server"""
+    correlation_id = getattr(request.state, "correlation_id", "unknown")
+    
+    try:
+        if not mcp_client:
+            return {
+                "status": "error",
+                "message": "MCP client not initialized"
+            }
+        
+        correlation_logger.info(
+            "Debug endpoint: Force refreshing MCP tools cache",
+            correlation_id=correlation_id,
+            additional_data={"mcp_server": settings.mcp_server.base_url}
+        )
+        
+        import time
+        start_time = time.time()
+        
+        # Force refresh the tools cache
+        tools_data = await mcp_client.refresh_tools_cache()
+        tools = [tool.get('name') for tool in tools_data.get('tools', [])]
+        
+        elapsed = time.time() - start_time
+        
+        correlation_logger.success(
+            f"Debug endpoint: MCP tools cache refreshed successfully",
+            correlation_id=correlation_id,
+            additional_data={
+                "mcp_server": settings.mcp_server.base_url,
+                "response_time": f"{elapsed:.3f}s",
+                "tools_count": len(tools),
+                "tools": tools
+            }
+        )
+        
+        return {
+            "status": "success",
+            "message": "Tools cache refreshed successfully",
+            "mcp_server": settings.mcp_server.base_url,
+            "response_time": f"{elapsed:.3f}s",
+            "tools_count": len(tools),
+            "available_tools": tools
+        }
+        
+    except Exception as e:
+        correlation_logger.error(
+            f"Debug endpoint: Failed to refresh tools cache: {str(e)}",
             correlation_id=correlation_id,
             additional_data={"error": str(e), "mcp_server": settings.mcp_server.base_url}
         )

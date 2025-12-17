@@ -181,7 +181,40 @@ mcp_server:
 
 ### 5.3. Backend Services Setup
 
-#### Option A: Run All Services with Docker Compose (Recommended)
+#### Option A: Cross-Platform Python Scripts (Recommended)
+
+**Install script dependencies:**
+```bash
+pip install -r requirements-scripts.txt
+```
+
+**Start all services (Windows, macOS, Linux):**
+```bash
+# On Windows
+python start-all-services.py
+
+# On macOS/Linux
+python3 start-all-services.py
+```
+
+**Stop all services:**
+```bash
+# On Windows
+python stop-all-services.py
+
+# On macOS/Linux
+python3 stop-all-services.py
+```
+
+The Python scripts provide:
+- ✅ Cross-platform compatibility (Windows, macOS, Linux)
+- ✅ Automatic virtual environment management
+- ✅ Dependency installation
+- ✅ Health checks and startup validation
+- ✅ Graceful process termination
+- ✅ Detailed logging and error reporting
+
+#### Option B: Docker Compose
 
 ```bash
 # Build and start all services
@@ -197,7 +230,19 @@ docker-compose logs -f
 docker-compose down
 ```
 
-#### Option B: Run Individual Services
+#### Option C: Shell Scripts (Unix/macOS Only)
+
+```bash
+# Start all services
+./start-all-services.sh
+
+# Stop all services
+./stop-all-services.sh
+```
+
+**Note:** Shell scripts (`.sh`) only work on Unix-based systems (macOS, Linux). Windows users should use the Python scripts (Option A).
+
+#### Option D: Run Individual Services
 
 **1. Auth Service (Port 8001):**
 ```bash

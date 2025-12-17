@@ -1,0 +1,8 @@
+# Cross-Platform Service Management Dependencies
+# Install with: pip install -r requirements-scripts.txt
+
+# Process and system utilities (cross-platform port checking and process management)
+psutil>=5.9.0
+
+# Colored terminal output (works on Windows, macOS, Linux)
+colorama>=0.4.6

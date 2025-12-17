@@ -6,6 +6,109 @@ All notable changes, fixes, and updates to this project are documented here.
 
 ## [Unreleased]
 
+## [2025-12-17] - Cross-Platform Service Management Scripts
+
+### Added
+- **Cross-Platform Python Scripts** for service management
+  - `start-all-services.py` - Starts all services on Windows, macOS, and Linux
+  - `stop-all-services.py` - Stops all services on Windows, macOS, and Linux
+  - `scripts/service_manager.py` - Core utility module with OS-agnostic functions
+  - `requirements-scripts.txt` - Script dependencies (psutil, colorama)
+  
+### Features
+- **Automatic OS Detection**: Scripts detect Windows, macOS, or Linux automatically
+- **Cross-Platform Port Management**: Uses `psutil` instead of OS-specific commands
+- **Virtual Environment Management**: Creates and activates venvs on any platform
+- **Graceful Process Termination**: Attempts graceful shutdown before force kill
+- **Health Checks**: Waits for services to be ready before proceeding
+- **Colored Output**: Uses `colorama` for consistent colored terminal output
+- **Error Handling**: Detailed error messages and recovery options
+- **Background Execution**: Platform-specific process spawning (works on Windows)
+
+### Changed
+- **README.md**: Updated with cross-platform script instructions as recommended method
+- **docs/SERVICE_MANAGEMENT.md**: Complete rewrite with cross-platform examples
+  - Added Windows PowerShell commands alongside Unix commands
+  - Updated all workflows to show both Windows and Unix approaches
+  - Marked shell scripts as "Unix/macOS only" with clear warnings
+
+### Technical Details
+
+**OS-Specific Implementations:**
+- **Port Checking**: `psutil.net_connections()` instead of `lsof` (Unix) or `netstat` (Windows)
+- **Process Termination**: `psutil.Process.terminate()` instead of `kill -9` (Unix) or `taskkill` (Windows)
+- **Virtual Environment**: Handles `venv/Scripts/` (Windows) vs `venv/bin/` (Unix)
+- **Background Processes**: Uses `CREATE_NEW_PROCESS_GROUP` on Windows, `os.setsid` on Unix
+
+**Service Manager Module Functions:**
+- `find_process_on_port()` - Cross-platform port checking
+- `kill_process_on_port()` - Graceful process termination with timeout
+- `check_port_available()` - Port availability checking
+- `wait_for_port()` - Service readiness validation
+- `create_virtualenv()` - OS-agnostic venv creation
+- `install_requirements()` - Dependency installation
+- `start_uvicorn_service()` - Service startup with health checks
+- `print_service_info()` - Formatted service status display
+
+### Benefits
+- ✅ **True cross-platform compatibility** - Single codebase works everywhere
+- ✅ **Better error handling** - Structured exceptions and recovery
+- ✅ **Graceful shutdown** - Attempts clean termination before force kill
+- ✅ **Automatic setup** - Creates venvs and installs dependencies automatically
+- ✅ **Health validation** - Waits for services to be ready
+- ✅ **Consistent behavior** - No shell differences between platforms
+- ✅ **Easier maintenance** - Python is easier to update than shell scripts
+
+### Backward Compatibility
+- Shell scripts (`.sh` files) remain functional for Unix/macOS users
+- Python scripts are now the **recommended method** for all platforms
+- Both methods documented in README and SERVICE_MANAGEMENT guide
+
+### Files Created
+1. `start-all-services.py` - Cross-platform startup script
+2. `stop-all-services.py` - Cross-platform shutdown script
+3. `scripts/service_manager.py` - Core utility module (350+ lines)
+4. `requirements-scripts.txt` - Script dependencies
+
+### Files Modified
+1. `README.md` - Updated Section 5.3 with cross-platform instructions
+2. `docs/SERVICE_MANAGEMENT.md` - Complete rewrite with OS-specific commands
+3. `docs/CHANGELOG.md` - This entry
+
+### Migration Guide for Users
+
+**Windows Users (New):**
+```bash
+# Install dependencies
+pip install -r requirements-scripts.txt
+
+# Start services
+python start-all-services.py
+
+# Stop services
+python stop-all-services.py
+```
+
+**macOS/Linux Users (Recommended):**
+```bash
+# Install dependencies
+pip3 install -r requirements-scripts.txt
+
+# Start services (Python - recommended)
+python3 start-all-services.py
+
+# Or use shell scripts (legacy)
+./start-all-services.sh
+```
+
+### Next Steps
+- Consider creating Windows batch files (`.bat`) as alternative to Python scripts
+- Add service restart functionality to Python scripts
+- Consider adding service health check utility script
+- Add automated tests for cross-platform functionality
+
+---
+
 ## [2025-12-15] - Complete Architecture Migration to Integration Service
 
 ### Changed

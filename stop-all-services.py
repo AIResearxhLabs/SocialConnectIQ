@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Cross-Platform Service Shutdown Script
-Stops: API Gateway + Backend Service + Integration Service + Agent Service
+Stops: API Gateway + Backend Service + Integration Service + Scheduling Service + Agent Service
 
 Works on: Windows, macOS, Linux
 """
@@ -37,6 +37,8 @@ def main():
         (8000, 'API Gateway'),
         (8001, 'Backend Service'),
         (8002, 'Integration Service'),
+        (8003, 'Scheduling Service'),
+        (8004, 'Analytics Service'),
         (8006, 'Agent Service'),
     ]
     

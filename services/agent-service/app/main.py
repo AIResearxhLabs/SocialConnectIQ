@@ -10,12 +10,19 @@ import sys
 import os
 from typing import Optional, List
 from contextlib import asynccontextmanager
+from datetime import datetime
+import httpx
+import firebase_admin
+from firebase_admin import credentials, firestore
+import traceback
+import pytz
 
 from .config import settings
 from .mcp_client import MCPClient
 from .linkedin_agent import LinkedInOAuthAgent
 from .twitter_agent import TwitterOAuthAgent
 from .content_agent import ContentRefinementAgent
+from .trending_agent import TrendingTopicsAgent
 
 # Add parent directory to path for shared utilities
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..')))
@@ -27,6 +34,12 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Service Config
+INTEGRATION_SERVICE_URL = os.getenv("INTEGRATION_SERVICE_URL", "http://localhost:8002")
+
+# Service Config
+INTEGRATION_SERVICE_URL = os.getenv("INTEGRATION_SERVICE_URL", "http://localhost:8002")
 
 # Initialize correlation logger
 # Use absolute path to project root logs directory
@@ -43,12 +56,122 @@ mcp_client: Optional[MCPClient] = None
 linkedin_agent: Optional[LinkedInOAuthAgent] = None
 twitter_agent: Optional[TwitterOAuthAgent] = None
 content_agent: Optional[ContentRefinementAgent] = None
+trending_agent: Optional[TrendingTopicsAgent] = None
 
+# Global Firebase DB client
+db = None
+
+# Robust Firebase Initialization
+try:
+    # Check if Firebase is already initialized
+    firebase_admin.get_app()
+    db = firestore.client()
+    logger.info("✅ Firebase already initialized and connected")
+except ValueError:
+    # Initialize Firebase with credentials from environment
+    try:
+        # Check if we have required Firebase credentials
+        firebase_project_id = os.getenv("FIREBASE_PROJECT_ID")
+        firebase_private_key = os.getenv("FIREBASE_PRIVATE_KEY", "").replace('\\n', '\n')
+        firebase_client_email = os.getenv("FIREBASE_CLIENT_EMAIL")
+        
+        logger.info("Initializing Firebase with environment credentials...")
+        
+        if firebase_project_id and firebase_private_key and firebase_client_email and len(firebase_private_key) > 50:
+            if "your-project-id" in firebase_project_id or "your-client-email" in firebase_client_email:
+                logger.warning("❌ CRITICAL: Firebase credentials are PLACEHOLDER values!")
+            else:
+                cred = credentials.Certificate({
+                    "type": "service_account",
+                    "project_id": firebase_project_id,
+                    "private_key": firebase_private_key,
+                    "client_email": firebase_client_email,
+                    "token_uri": "https://oauth2.googleapis.com/token",
+                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                    "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+                })
+                firebase_admin.initialize_app(cred)
+                db = firestore.client()
+                logger.info("✅ Firebase initialized successfully with real credentials")
+        else:
+            logger.warning("❌ CRITICAL: Firebase credentials are incomplete or missing!")
+    except Exception as e:
+        logger.error(f"❌ ERROR: Could not initialize Firebase: {e}")
+        logger.error(traceback.format_exc())
+
+# Helper to get platform tokens
+def get_platform_token(user_id: str, platform: str) -> Optional[str]:
+    """Retrieve OAuth access token for a user and platform from Firestore"""
+    if db is None:
+        logger.warning(f"Firestore not initialized, cannot get token for {platform}")
+        return None
+    try:
+        user_ref = db.collection('users').document(user_id)
+        user_doc = user_ref.get()
+        
+        if not user_doc.exists:
+            return None
+            
+        user_data = user_doc.to_dict()
+        integrations = user_data.get('integrations', {})
+        platform_data = integrations.get(platform, {})
+        return platform_data.get('access_token')
+    except Exception as e:
+        logger.error(f"Error fetching {platform} token: {e}")
+        return None
+
+# Helper to save post history
+async def save_post_history(user_id: str, content: str, platforms: list, results: dict):
+    """Save posted content to Firestore 'scheduled_posts' collection so it appears in Calendar"""
+    if db is None:
+        logger.warning("Firestore not initialized, cannot save post history")
+        return
+        
+    try:
+        # Filter strictly for successful platforms
+        successful_platforms = [p for p in platforms if results.get(p, {}).get("success")]
+        if not successful_platforms:
+            logger.info("No successful platforms to save post history for")
+            return
+
+        # Prepare platform post IDs
+        platform_post_ids = {}
+        for platform in successful_platforms:
+            res = results.get(platform, {}).get("result", {})
+            # Extract ID based on platform patterns
+            post_id = res.get("id") or res.get("urn") or res.get("post_id") or res.get("share_urn")
+            if post_id:
+                platform_post_ids[platform] = post_id
+
+        # Use UTC now for consistency
+        now = datetime.utcnow()
+        
+        post_doc = {
+            "content": content,
+            "platforms": successful_platforms,
+            "scheduledTime": now,  # For immediate posts, scheduledTime = now
+            "status": "posted",
+            "createdAt": now,
+            "postedAt": now,
+            "aiGenerated": True,
+            "platformPostIds": platform_post_ids if platform_post_ids else {}
+        }
+        
+        # Add to 'scheduled_posts' collection so it appears in Calendar
+        db.collection('users').document(user_id).collection('scheduled_posts').add(post_doc)
+        logger.info(f"✅ Saved AI chat post to 'scheduled_posts' for calendar - user: {user_id}, platforms: {successful_platforms}")
+        
+    except Exception as e:
+        logger.error(f"Failed to save post history: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+
+# Rate limiting (in-memory)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifecycle manager for the application"""
-    global mcp_client, linkedin_agent, twitter_agent, content_agent
+    global mcp_client, linkedin_agent, twitter_agent, content_agent, trending_agent
     
     # Startup
     logger.info("Initializing Agent Service...")
@@ -84,6 +207,13 @@ async def lifespan(app: FastAPI):
         )
         logger.info("Content Refinement Agent initialized")
         
+        # Initialize Trending Topics agent
+        trending_agent = TrendingTopicsAgent(
+            openai_api_key=settings.openai.api_key,
+            model="gpt-4o" # High quality model requested by user
+        )
+        logger.info("Trending Topics Agent initialized")
+        
     except Exception as e:
         logger.error(f"Failed to initialize services: {str(e)}")
         raise
@@ -111,6 +241,58 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# --- Image Proxy Endpoint (Bypass CORS for external AI images) ---
+import httpx
+from fastapi.responses import Response
+
+@app.get("/proxy-image")
+async def proxy_image(url: str):
+    """
+    Proxy external images through our backend to bypass CORS restrictions.
+    Used for fetching AI-generated images from services like Pollinations.ai.
+    """
+    logger.info(f"[PROXY-IMAGE] Fetching: {url[:100]}...")
+    
+    try:
+        # Disable SSL verification for dev (Pollinations uses valid certs but Windows can have issues)
+        async with httpx.AsyncClient(
+            timeout=60.0,  # Longer timeout - image generation can be slow
+            follow_redirects=True,
+            verify=False  # Bypass SSL cert verification for development
+        ) as client:
+            response = await client.get(url)
+            
+            logger.info(f"[PROXY-IMAGE] Got response: {response.status_code}, size: {len(response.content)} bytes")
+            
+            if response.status_code != 200:
+                logger.error(f"[PROXY-IMAGE] Upstream returned {response.status_code}")
+                raise HTTPException(status_code=response.status_code, detail=f"Upstream returned {response.status_code}")
+            
+            if len(response.content) < 1000:
+                logger.error(f"[PROXY-IMAGE] Response too small, likely an error page")
+                raise HTTPException(status_code=502, detail="Image response too small")
+            
+            # Return the image with proper headers
+            return Response(
+                content=response.content,
+                media_type=response.headers.get("content-type", "image/jpeg"),
+                headers={
+                    "Cache-Control": "no-cache",  # Don't cache so regenerate works
+                    "Access-Control-Allow-Origin": "*"
+                }
+            )
+    except httpx.RequestError as e:
+        logger.error(f"[PROXY-IMAGE] Request error: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=502, detail=f"Request failed: {str(e)}")
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions as-is
+    except Exception as e:
+        logger.error(f"[PROXY-IMAGE] Unexpected error: {type(e).__name__}: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=502, detail=f"Proxy error: {str(e)}")
 
 
 # Request/Response Models
@@ -172,6 +354,90 @@ class RefineContentResponse(BaseModel):
     alternatives: Optional[List[str]] = None
     metadata: Optional[dict] = None
     error: Optional[str] = None
+
+
+# AI Chat Models for Composer 2.0
+class ChatMessage(BaseModel):
+    role: str  # 'user' or 'assistant'
+    content: str
+
+
+class ChatRequest(BaseModel):
+    user_id: str
+    message: str
+    current_content: Optional[str] = ""
+    conversation_history: List[ChatMessage] = []
+    selected_platforms: List[str] = []  # Platforms user has selected in UI
+    connected_platforms: List[str] = []  # Platforms user has connected
+    timezone: Optional[str] = "Asia/Kolkata"  # User's timezone for scheduling
+    image_data: Optional[str] = None  # Base64 image data
+    image_mime_type: Optional[str] = None  # MIME type for image
+
+
+class ChatResponse(BaseModel):
+    success: bool
+    reply: str
+    suggested_content: Optional[str] = None
+    action: Optional[str] = None  # "posted", "scheduled", None
+    action_result: Optional[dict] = None  # Details of action taken
+    error: Optional[str] = None
+
+
+# Tool definitions for OpenAI function calling
+CHAT_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "post_to_platforms",
+            "description": "Post content to social media platforms immediately. Use this when the user asks to 'post', 'publish', or 'send' their content now.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {
+                        "type": "string",
+                        "description": "The content/caption to post"
+                    },
+                    "platforms": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": ["linkedin", "twitter", "facebook", "instagram"]},
+                        "description": "List of platforms to post to"
+                    }
+                },
+                "required": ["content", "platforms"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "schedule_post",
+            "description": "Schedule content to be posted at a specific date and time. Use this when the user asks to 'schedule' their content for later.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {
+                        "type": "string",
+                        "description": "The content/caption to schedule"
+                    },
+                    "platforms": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": ["linkedin", "twitter", "facebook", "instagram"]},
+                        "description": "List of platforms to schedule for"
+                    },
+                    "date": {
+                        "type": "string",
+                        "description": "Date in YYYY-MM-DD format"
+                    },
+                    "time": {
+                        "type": "string",
+                        "description": "Time in HH:MM format (24-hour)"
+                    }
+                },
+                "required": ["content", "platforms", "date", "time"]
+            }
+        }
+    }
+]
 
 
 # Middleware to add correlation ID
@@ -1067,6 +1333,552 @@ async def refresh_mcp_tools(request: Request):
             "message": str(e),
             "mcp_server": settings.mcp_server.base_url
         }
+
+
+# ============================================================
+# AI CHAT ENDPOINT FOR COMPOSER 2.0 WITH TOOL CALLING
+# ============================================================
+
+async def execute_post_to_platforms(user_id: str, content: str, platforms: list, correlation_id: str, image_data: str = None, image_mime_type: str = None):
+    """Execute posting to specified platforms via MCP using direct token access"""
+    results = {}
+    
+    for platform in platforms:
+        try:
+            # Get token directly from DB
+            token = get_platform_token(user_id, platform)
+            
+            if not token:
+                results[platform] = {"success": False, "error": "Not authenticated. Please connect account first."}
+                continue
+
+            if platform == "linkedin":
+                if image_data:
+                    # Bypass MCP for LinkedIn image posts and call Integration Service directly
+                    async with httpx.AsyncClient() as client:
+                        response = await client.post(
+                            f"{INTEGRATION_SERVICE_URL}/api/integrations/linkedin/post-with-image",
+                            json={
+                                "content": content,
+                                "user_id": user_id,
+                                "image_data": image_data,
+                                "image_mime_type": image_mime_type or "image/jpeg"
+                            },
+                             timeout=60.0
+                        )
+                        if response.status_code == 200:
+                             result = response.json()
+                             results[platform] = {"success": True, "result": result}
+                        else:
+                             results[platform] = {"success": False, "error": f"Failed to upload image: {response.text}"}
+                else: 
+                     result = await mcp_client.invoke_tool(
+                        tool_name="postToLinkedIn",
+                        parameters={
+                            "content": content, 
+                            "accessToken": token,
+                            "userId": user_id,
+                            "imageData": image_data,
+                            "imageMimeType": image_mime_type
+                        },
+                        correlation_id=correlation_id,
+                        user_id=user_id
+                    )
+                     results[platform] = {"success": True, "result": result}
+            elif platform == "twitter":
+                result = await mcp_client.invoke_tool(
+                    tool_name="postToTwitter",
+                    parameters={
+                        "content": content, 
+                        "accessToken": token,
+                        "userId": user_id,
+                        "imageData": image_data,
+                        "imageMimeType": image_mime_type
+                    },
+                    correlation_id=correlation_id,
+                    user_id=user_id
+                )
+                results[platform] = {"success": True, "result": result}
+            elif platform == "facebook":
+                result = await mcp_client.invoke_tool(
+                    tool_name="postToFacebook",
+                    parameters={
+                        "content": content, 
+                        "accessToken": token,
+                        "userId": user_id,
+                        "imageData": image_data,
+                        "imageMimeType": image_mime_type
+                    },
+                    correlation_id=correlation_id,
+                    user_id=user_id
+                )
+                results[platform] = {"success": True, "result": result}
+            else:
+                results[platform] = {"success": False, "error": f"Platform {platform} not supported yet"}
+        except Exception as e:
+            results[platform] = {"success": False, "error": str(e)}
+            logger.error(f"Failed to post to {platform}: {str(e)}")
+
+    # Save history side-effect
+    await save_post_history(user_id, content, platforms, results)
+    
+    return results
+
+
+async def execute_schedule_post(user_id: str, content: str, platforms: list, date: str, time: str, timezone: str, correlation_id: str):
+    """Schedule a post to Firestore for later execution"""
+    try:
+        import pytz
+        
+        # Parse the scheduled time in user's timezone
+        tz = pytz.timezone(timezone)
+        scheduled_dt = datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M")
+        scheduled_dt = tz.localize(scheduled_dt)
+        
+        # Create scheduled post document
+        scheduled_post = {
+            "content": content,
+            "platforms": platforms,
+            "scheduledTime": scheduled_dt.isoformat(),
+            "status": "pending",
+            "createdAt": datetime.now(pytz.UTC).isoformat(),
+            "userId": user_id
+        }
+        
+        # Save to Firestore directly (Bypassing MCP tool to avoid dependency issues)
+        if db is None:
+            raise Exception("Database connection not initialized")
+
+        # Convert ISO strings back to datetime objects for Firestore Timestamp compatibility
+        # (Though Firestore client handles ISO strings, explicit datetime is safer for queries)
+        scheduled_post["scheduledTime"] = scheduled_dt
+        scheduled_post["createdAt"] = datetime.now(pytz.UTC)
+
+        # Add to users/{userId}/scheduled_posts
+        doc_ref = db.collection('users').document(user_id).collection('scheduled_posts').document()
+        doc_ref.set(scheduled_post)
+        
+        result = {"id": doc_ref.id, "success": True}
+        
+        return {
+            "success": True,
+            "scheduled_time": scheduled_dt.strftime("%B %d, %Y at %I:%M %p"),
+            "platforms": platforms,
+            "result": result
+        }
+    except Exception as e:
+        logger.error(f"Failed to schedule post: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@app.post("/agent/chat", response_model=ChatResponse)
+async def chat_with_ai(
+    request: Request,
+    chat_request: ChatRequest,
+    x_correlation_id: Optional[str] = Header(None, alias="X-Correlation-ID")
+):
+    """
+    AI-powered chat endpoint for the Composer with tool-calling capabilities.
+    Can post content, schedule posts, or just help write/refine content.
+    """
+    correlation_id = x_correlation_id or f"chat-{chat_request.user_id}-{id(request)}"
+    
+    correlation_logger.info(
+        f"AI Chat request received",
+        correlation_id=correlation_id,
+        additional_data={
+            "user_id": chat_request.user_id,
+            "message_preview": chat_request.message[:100] if chat_request.message else "",
+            "has_current_content": bool(chat_request.current_content),
+            "history_length": len(chat_request.conversation_history),
+            "selected_platforms": chat_request.selected_platforms,
+            "connected_platforms": chat_request.connected_platforms
+        }
+    )
+    
+    try:
+        # Build the enhanced system prompt with tool awareness
+        connected_str = ", ".join(chat_request.connected_platforms) if chat_request.connected_platforms else "none"
+        selected_str = ", ".join(chat_request.selected_platforms) if chat_request.selected_platforms else "none"
+        
+        system_prompt = f"""You are a professional social media content writer and assistant. 
+Your job is to help users write engaging posts and manage their social media presence.
+
+CURRENT CONTEXT:
+- User's connected platforms: {connected_str}
+- User's currently selected platforms: {selected_str}
+- Current date/time: {datetime.now().strftime("%Y-%m-%d %H:%M")}
+
+CAPABILITIES:
+1. **Write Content**: Help write engaging posts for social media
+2. **Post Now**: When user says "post this", "publish", or "send now" - use the post_to_platforms function
+3. **Schedule**: When user says "schedule for..." - use the schedule_post function
+
+GUIDELINES FOR WRITING:
+- Be concise but impactful
+- Use professional yet approachable tone
+- Include relevant emojis sparingly
+- Keep posts under 3000 characters
+
+GUIDELINES FOR POSTING/SCHEDULING:
+- Only post to platforms that are connected
+- If user doesn't specify platforms, use the currently selected ones
+- If no content is specified, use the current_content from context
+- For scheduling, parse dates naturally (e.g., "tomorrow at 9am" → appropriate date/time)
+
+FORMAT FOR CONTENT RESPONSES:
+When writing/refining content, format as:
+[Your message to the user]
+
+---POST---
+[The actual post content]
+---END---
+
+When executing actions (posting/scheduling), just respond naturally confirming what you did."""
+
+        # Build conversation messages for OpenAI
+        messages = [{"role": "system", "content": system_prompt}]
+        
+        # Add conversation history
+        for msg in chat_request.conversation_history[-10:]:
+            messages.append({
+                "role": msg.role,
+                "content": msg.content
+            })
+        
+        # Add context about current content if exists
+        user_message = chat_request.message
+        if chat_request.current_content:
+            user_message = f"[Current post content in editor: \"{chat_request.current_content}\"]\n\nUser: {chat_request.message}"
+        
+        messages.append({"role": "user", "content": user_message})
+        
+        # Call OpenAI with function calling
+        import openai
+        client = openai.OpenAI()
+        
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+            tools=CHAT_TOOLS,
+            tool_choice="auto",
+            max_tokens=1500,
+            temperature=0.7
+        )
+        
+        response_message = response.choices[0].message
+        
+        # Check if the model wants to call a function
+        if response_message.tool_calls:
+            tool_call = response_message.tool_calls[0]
+            function_name = tool_call.function.name
+            import json
+            function_args = json.loads(tool_call.function.arguments)
+            
+            correlation_logger.info(
+                f"AI requesting tool call: {function_name}",
+                correlation_id=correlation_id,
+                additional_data={"function_args": function_args}
+            )
+            
+            # Execute the function
+            if function_name == "post_to_platforms":
+                content = function_args.get("content", chat_request.current_content)
+                platforms = function_args.get("platforms", chat_request.selected_platforms)
+                
+                if not content:
+                    return ChatResponse(
+                        success=True,
+                        reply="I don't see any content to post. Please write something first or tell me what you'd like to post!",
+                        action=None
+                    )
+                
+                if not platforms:
+                    return ChatResponse(
+                        success=True,
+                        reply="Please select at least one platform to post to, or tell me which platforms you want to use.",
+                        action=None
+                    )
+                
+                # Execute posting
+                post_results = await execute_post_to_platforms(
+                    user_id=chat_request.user_id,
+                    content=content,
+                    platforms=platforms,
+                    correlation_id=correlation_id,
+                    image_data=chat_request.image_data,
+                    image_mime_type=chat_request.image_mime_type
+                )
+                
+                # Build response message
+                success_platforms = [p for p, r in post_results.items() if r.get("success")]
+                failed_platforms = [p for p, r in post_results.items() if not r.get("success")]
+                
+                if success_platforms and not failed_platforms:
+                    reply = f"✅ **Posted successfully!**\n" + "\n".join([f"- {p.title()}: ✓ Posted" for p in success_platforms])
+                    reply += "\n\nYour content is now live! 🎉"
+                elif success_platforms and failed_platforms:
+                    reply = f"⚠️ **Partially posted**\n"
+                    reply += "\n".join([f"- {p.title()}: ✓ Posted" for p in success_platforms])
+                    reply += "\n" + "\n".join([f"- {p.title()}: ✗ Failed ({post_results[p].get('error', 'Unknown error')})" for p in failed_platforms])
+                else:
+                    reply = f"❌ **Posting failed**\n"
+                    reply += "\n".join([f"- {p.title()}: ✗ {post_results[p].get('error', 'Unknown error')}" for p in failed_platforms])
+                
+                if success_platforms:
+                    action_type = "posted"
+                else:
+                    action_type = None
+
+                return ChatResponse(
+                    success=True,
+                    reply=reply,
+                    action=action_type,
+                    action_result={
+                        "platforms": platforms,
+                        "results": post_results,
+                        "content_preview": content[:100] + "..." if len(content) > 100 else content
+                    }
+                )
+            
+            elif function_name == "schedule_post":
+                content = function_args.get("content", chat_request.current_content)
+                platforms = function_args.get("platforms", chat_request.selected_platforms)
+                date = function_args.get("date")
+                time = function_args.get("time")
+                
+                if not content:
+                    return ChatResponse(
+                        success=True,
+                        reply="I don't see any content to schedule. Please write something first!",
+                        action=None
+                    )
+                
+                if not platforms:
+                    return ChatResponse(
+                        success=True,
+                        reply="Please select platforms to schedule for.",
+                        action=None
+                    )
+                
+                # Execute scheduling
+                schedule_result = await execute_schedule_post(
+                    user_id=chat_request.user_id,
+                    content=content,
+                    platforms=platforms,
+                    date=date,
+                    time=time,
+                    timezone=chat_request.timezone or "Asia/Kolkata",
+                    correlation_id=correlation_id
+                )
+                
+                if schedule_result.get("success"):
+                    platforms_str = ", ".join([p.title() for p in platforms])
+                    reply = f"📅 **Scheduled successfully!**\n\n"
+                    reply += f"Your post will be published to {platforms_str} on {schedule_result.get('scheduled_time')}.\n\n"
+                    reply += "You can view and manage your scheduled posts in the Calendar."
+                    
+                    return ChatResponse(
+                        success=True,
+                        reply=reply,
+                        action="scheduled",
+                        action_result={
+                            "platforms": platforms,
+                            "scheduled_time": schedule_result.get("scheduled_time"),
+                            "content_preview": content[:100] + "..." if len(content) > 100 else content
+                        }
+                    )
+                else:
+                    return ChatResponse(
+                        success=True,
+                        reply=f"❌ Failed to schedule: {schedule_result.get('error')}",
+                        action=None
+                    )
+        
+        # No tool call - regular content response
+        ai_response = response_message.content or ""
+        
+        # Parse the response to extract suggested content
+        suggested_content = None
+        reply = ai_response
+        
+        if "---POST---" in ai_response and "---END---" in ai_response:
+            parts = ai_response.split("---POST---")
+            reply = parts[0].strip()
+            content_part = parts[1].split("---END---")[0].strip()
+            if content_part:
+                suggested_content = content_part
+        
+        correlation_logger.success(
+            f"AI Chat response generated",
+            correlation_id=correlation_id,
+            additional_data={
+                "reply_length": len(reply),
+                "has_suggested_content": suggested_content is not None,
+                "used_tools": False
+            }
+        )
+        
+        return ChatResponse(
+            success=True,
+            reply=reply,
+            suggested_content=suggested_content
+        )
+        
+    except Exception as e:
+        correlation_logger.error(
+            f"AI Chat error: {str(e)}",
+            correlation_id=correlation_id,
+            additional_data={"error": str(e)}
+        )
+        return ChatResponse(
+            success=False,
+            reply=f"Sorry, I encountered an error: {str(e)}",
+            error=str(e)
+        )
+
+
+# ============================================================
+# TRENDING TOPICS ENDPOINTS
+# ============================================================
+
+class TrendingRequest(BaseModel):
+    user_id: str
+    force_refresh: bool = False
+    count: int = 10
+
+
+class TrendingTopic(BaseModel):
+    id: str
+    title: str
+    summary: str
+    category: str
+    platformId: str
+    metrics: dict
+    imageUrl: Optional[str] = None
+    hashtags: List[str] = []
+
+
+class TrendingResponse(BaseModel):
+    success: bool
+    topics: List[dict] = []
+    cached: bool = False
+    error: Optional[str] = None
+
+
+@app.get("/trending/{user_id}")
+async def get_trending_topics(
+    user_id: str,
+    force_refresh: bool = False,
+    count: int = 10,
+    x_correlation_id: Optional[str] = Header(None, alias="X-Correlation-ID")
+):
+    """
+    Get personalized trending topics based on user's interests.
+    Fetches interests from Firestore and generates AI-powered trending content.
+    Results are cached for 30 minutes unless force_refresh=true.
+    """
+    correlation_id = x_correlation_id or generate_correlation_id()
+    
+    correlation_logger.info(
+        f"Trending topics request for user {user_id}",
+        correlation_id=correlation_id,
+        additional_data={"force_refresh": force_refresh, "count": count}
+    )
+    
+    if not trending_agent:
+        return TrendingResponse(
+            success=False,
+            error="Trending agent not initialized"
+        )
+    
+    if not db:
+        return TrendingResponse(
+            success=False,
+            error="Database not initialized"
+        )
+    
+    try:
+        # Fetch user's interests from Firestore
+        interests = []
+        
+        # Try to get interests from onboarding preferences
+        onboarding_ref = db.document(f'users/{user_id}/preferences/onboarding')
+        onboarding_doc = onboarding_ref.get()
+        
+        if onboarding_doc.exists:
+            data = onboarding_doc.to_dict()
+            # Check if personalization is enabled OR if interests exist (for backward compatibility)
+            if data.get('personalizationEnabled', False) or data.get('selectedInterests'):
+                interests = data.get('selectedInterests', [])
+        
+        if not interests:
+            correlation_logger.warning(
+                f"No interests found for user {user_id}",
+                correlation_id=correlation_id
+            )
+            return TrendingResponse(
+                success=False,
+                error="No interests configured. Please enable personalization in Settings and select your interests.",
+                topics=[]
+            )
+        
+        correlation_logger.info(
+            f"Found {len(interests)} interests for user",
+            correlation_id=correlation_id,
+            additional_data={"interests": interests}
+        )
+        
+        # Generate trending topics
+        result = await trending_agent.generate_trending_topics(
+            user_id=user_id,
+            interests=interests,
+            correlation_id=correlation_id,
+            force_refresh=force_refresh,
+            count=count
+        )
+        
+        if result.get("success"):
+            correlation_logger.success(
+                f"Generated {len(result.get('topics', []))} trending topics",
+                correlation_id=correlation_id,
+                additional_data={"cached": result.get("cached", False)}
+            )
+        
+        return TrendingResponse(
+            success=result.get("success", False),
+            topics=result.get("topics", []),
+            cached=result.get("cached", False),
+            error=result.get("error")
+        )
+        
+    except Exception as e:
+        correlation_logger.error(
+            f"Error fetching trending topics: {str(e)}",
+            correlation_id=correlation_id
+        )
+        return TrendingResponse(
+            success=False,
+            error=str(e)
+        )
+
+
+@app.post("/trending/clear-cache")
+async def clear_trending_cache(
+    x_correlation_id: Optional[str] = Header(None, alias="X-Correlation-ID")
+):
+    """Clear the trending topics cache"""
+    correlation_id = x_correlation_id or generate_correlation_id()
+    
+    if trending_agent:
+        trending_agent.clear_cache()
+        correlation_logger.info("Trending cache cleared", correlation_id=correlation_id)
+        return {"success": True, "message": "Cache cleared"}
+    
+    return {"success": False, "error": "Trending agent not initialized"}
 
 
 if __name__ == "__main__":

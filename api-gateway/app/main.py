@@ -116,7 +116,7 @@ async def route_linkedin_auth(request: Request):
             response = await client.post(
                 f"{INTEGRATION_SERVICE_URL}/api/integrations/linkedin/auth",
                 headers=headers_to_forward,
-                timeout=30.0
+                timeout=60.0
             )
             
             print(f"📥 [API-GATEWAY] Response from Integration Service:")
@@ -228,7 +228,8 @@ async def route_linkedin_post(request: Request):
             response = await client.post(
                 f"{INTEGRATION_SERVICE_URL}/api/integrations/linkedin/post",
                 json=body,
-                headers={k: v for k, v in request.headers.items() if k.lower() not in ('host', 'content-length')}
+                headers={k: v for k, v in request.headers.items() if k.lower() not in ('host', 'content-length')},
+                timeout=60.0
             )
             response.raise_for_status()
             return JSONResponse(content=response.json(), status_code=response.status_code)
@@ -347,7 +348,8 @@ async def route_twitter_auth(request: Request):
         try:
             response = await client.post(
                 f"{INTEGRATION_SERVICE_URL}/api/integrations/twitter/auth",
-                headers={k: v for k, v in request.headers.items() if k.lower() not in ('host', 'content-length')}
+                headers={k: v for k, v in request.headers.items() if k.lower() not in ('host', 'content-length')},
+                timeout=60.0
             )
             response.raise_for_status()
             return JSONResponse(content=response.json(), status_code=response.status_code)

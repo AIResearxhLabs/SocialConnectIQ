@@ -1,44 +1,18 @@
-# Social Media Management Dashboard
+# React + Vite
 
-This directory contains the frontend code for a comprehensive Social Media Management application. It is a single-page application (SPA) built with **React** and **TypeScript**.
+This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
-## 1. Project Vision
+Currently, two official plugins are available:
 
-This application empowers users to streamline their social media strategy by offering a unified dashboard to manage **WhatsApp, Instagram, Twitter, OneDrive, Facebook, and LinkedIn**. The platform focuses on a user-friendly experience, powerful analytics, and efficient content scheduling, with a customizable UI supporting both light and dark modes.
+- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
+- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
 
----
+## React Compiler
 
-## 2. Project Documentation
+The React Compiler is enabled on this template. See [this documentation](https://react.dev/learn/react-compiler) for more information.
 
-For detailed information about the project's goals, features, and technical implementation, please refer to the following documents:
+Note: This will impact Vite dev & build performances.
 
-*   **[Product Requirements Document (PRD)](./docs/product-requirements.md):** Defines the project's vision, user personas, and feature requirements.
-*   **[Functional Specification Document (FSD)](./docs/functional-specification.md):** Outlines the system architecture, technical design, data models, and API specifications.
+## Expanding the ESLint configuration
 
----
-
-## 3. Technical Specifications
-
-*   **Frontend:**
-    *   **Framework:** React with TypeScript
-    *   **UI Library:** Material-UI (MUI)
-    *   **Routing:** React Router DOM
-    *   **Authentication:** Firebase Authentication
-
----
-
-## 4. Available Scripts
-
-In the project directory, you can run:
-
-### `npm start`
-
-Runs the app in development mode. Open [http://localhost:3000](http://localhost:3000) to view it in the browser.
-
-### `npm test`
-
-Launches the test runner in interactive watch mode.
-
-### `npm run build`
-
-Builds the app for production to the `build` folder.
+If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.

@@ -18,6 +18,8 @@ aiohttp>=3.11.0
 # Configuration and environment
 python-dotenv>=1.0.0
 pyyaml>=6.0.1
+firebase-admin>=6.1.0
+pytz>=2023.3
 
 # Utilities
 python-json-logger>=2.0.7

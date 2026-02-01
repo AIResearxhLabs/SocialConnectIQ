@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """
 Cross-Platform Service Startup Script
-Starts: API Gateway + Backend Service + Integration Service + Agent Service
+Starts: API Gateway + Backend Service + Integration Service + Agent Service + Scheduling Service
 
 Works on: Windows, macOS, Linux
 """
 
+import os
 import sys
+
+# Force UTF-8 encoding on Windows to prevent unicode/emoji crashes
+if sys.platform == 'win32':
+    os.environ['PYTHONUTF8'] = '1'
+
 from pathlib import Path
 
 # Add scripts directory to path
@@ -36,14 +42,16 @@ def main():
     services_config = [
         ('backend-service', 'backend-service', 8001, '0.0.0.0', False),
         ('integration-service', 'services/integration-service', 8002, '127.0.0.1', True),
+        ('scheduling-service', 'services/scheduling-service', 8003, '127.0.0.1', True),
         ('agent-service', 'services/agent-service', 8006, '127.0.0.1', True),
+        ('analytics-service', 'services/analytics-service', 8004, '0.0.0.0', True),
         ('api-gateway', 'api-gateway', 8000, '0.0.0.0', False),
     ]
     
     # Step 1: Clean up any existing processes
     print(f"{Fore.CYAN}🧹 Cleaning up existing processes...{Style.RESET_ALL}")
-    ports_to_clean = [8000, 8001, 8002, 8006]
-    service_names = ['API Gateway', 'Backend Service', 'Integration Service', 'Agent Service']
+    ports_to_clean = [8000, 8001, 8002, 8003, 8006, 8004]
+    service_names = ['API Gateway', 'Backend Service', 'Integration Service', 'Scheduling Service', 'Agent Service', 'Analytics Service']
     
     for port, service_name in zip(ports_to_clean, service_names):
         manager.kill_process_on_port(port, service_name)
@@ -55,7 +63,10 @@ def main():
         'api-gateway.log',
         'backend-service.log',
         'integration-service.log',
-        'agent-service.log'
+        'scheduling-service.log',
+        'scheduling-service.log',
+        'agent-service.log',
+        'analytics-service.log'
     ]
     manager.clear_logs(log_files)
     print()

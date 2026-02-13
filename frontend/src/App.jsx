@@ -16,8 +16,12 @@ import {
     serverTimestamp,
     orderBy
 } from "firebase/firestore";
+import { aiService } from './api/ai';
 import { auth, db } from "./firebase";
-import { Sun, Moon, LayoutDashboard, Send, BarChart2, Settings, Zap, Facebook, Instagram, Twitter, Linkedin, Cloud, MessageSquare, LogIn, X, Clock, Image as ImageIcon, Upload, Menu, Phone, CheckCircle, AlertTriangle, ArrowLeft, ArrowRight, ThumbsUp, MessageSquare as CommentIcon, Share2, TrendingUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown, Bell, MoreVertical, Trash2, Sparkles, Eye, FileText, Save, History, CheckCircle2, Info, Hash, LogOut, Download, RefreshCw } from 'lucide-react';
+import BillingContent from './components/BillingContent';
+import Billing from './components/Billing';
+import AdBanner from './components/AdBanner';
+import { Sun, Moon, LayoutDashboard, Send, BarChart2, Settings, Zap, Facebook, Instagram, Twitter, Linkedin, Cloud, MessageSquare, LogIn, X, Clock, Image as ImageIcon, Upload, Menu, Phone, CheckCircle, AlertTriangle, ArrowLeft, ArrowRight, ThumbsUp, MessageSquare as CommentIcon, Share2, TrendingUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown, Bell, MoreVertical, Trash2, Sparkles, Eye, FileText, Save, History, CheckCircle2, Info, Hash, LogOut, Download, RefreshCw, User, CreditCard, Lock } from 'lucide-react';
 
 // --- API INTEGRATION LAYER ---
 import {
@@ -50,7 +54,7 @@ const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial
 const PLATFORMS = [
     { id: 'facebook', name: 'Facebook', icon: Facebook, color: 'bg-blue-600', hover: 'hover:bg-blue-700', description: 'Schedule posts and track page performance.' },
     { id: 'instagram', name: 'Instagram', icon: Instagram, color: 'bg-pink-600', hover: 'hover:bg-pink-700', description: 'Publish Reels, Stories, and carousel posts.' },
-    // REMOVED: { id: 'twitter', name: 'Twitter (X)', icon: Twitter, color: 'bg-sky-500', hover: 'hover:bg-sky-600', description: 'Monitor engagement and publish tweets.' },
+    { id: 'twitter', name: 'Twitter (X)', icon: Twitter, color: 'bg-sky-500', hover: 'hover:bg-sky-600', description: 'Monitor engagement and publish tweets.' },
     { id: 'linkedin', name: 'LinkedIn', icon: Linkedin, color: 'bg-sky-700', hover: 'hover:bg-sky-800', description: 'Manage company pages and professional profiles.' },
     { id: 'whatsapp', name: 'WhatsApp', icon: MessageSquare, color: 'bg-green-600', hover: 'hover:bg-green-700', description: 'Manage customer communications via WhatsApp API.' },
     { id: 'onedrive', name: 'OneDrive', icon: Cloud, color: 'bg-blue-500', hover: 'hover:bg-blue-600', description: 'Access media files directly from cloud storage.' },
@@ -1950,7 +1954,7 @@ const LoginModal = ({ isOpen, onClose }) => {
 
 
 // --- SideBar Component ---
-const Sidebar = ({ isDarkMode, handleNavClick, isSidebarOpen, toggleSidebar, view, user }) => {
+const Sidebar = ({ isDarkMode, handleNavClick, isSidebarOpen, toggleSidebar, view, user, userPlan }) => {
     // Determine the color of "Connect" based on dark mode state
     const connectColorClass = isDarkMode ? 'text-gray-100' : 'text-blue-600';
 
@@ -1977,6 +1981,7 @@ const Sidebar = ({ isDarkMode, handleNavClick, isSidebarOpen, toggleSidebar, vie
         { name: 'Analytics', icon: BarChart2, path: 'analytics' },
         { name: 'Integrations', icon: Zap, path: 'integrations_page' },
         { name: 'Trending', icon: TrendingUp, path: 'trending_panel' }, // NEW TRENDING PATH
+        { name: 'Billing', icon: CreditCard, path: 'billing' },
         { name: 'Settings', icon: Settings, path: 'settings' },
     ];
 
@@ -2017,6 +2022,7 @@ const Sidebar = ({ isDarkMode, handleNavClick, isSidebarOpen, toggleSidebar, vie
                         <img
                             src={user.photoURL}
                             alt="Profile"
+                            referrerPolicy="no-referrer"
                             className={`rounded-full border-2 border-blue-500 shadow ${isSidebarOpen ? 'w-14 h-14' : 'w-8 h-8'}`}
                         />
                     ) : (
@@ -2071,7 +2077,16 @@ const Sidebar = ({ isDarkMode, handleNavClick, isSidebarOpen, toggleSidebar, vie
             </nav>
 
             {/* User ID Footer (Collapsed/Expanded) */}
-            <div className={`mt-auto pt-4 border-t border-gray-200 dark:border-gray-800 ${isSidebarOpen ? 'text-left px-4' : 'text-center'}`}>
+            <div className={`mt-auto overflow-hidden ${isSidebarOpen ? 'px-4' : 'px-2'}`}>
+                {/* Ad Banner for Basic Users */}
+                {userPlan === 'basic' && (
+                    <div className="mb-4">
+                        <AdBanner userPlan={userPlan} isSidebar={true} isCollapsed={!isSidebarOpen} />
+                    </div>
+                )}
+            </div>
+
+            <div className={`pt-4 border-t border-gray-200 dark:border-gray-800 ${isSidebarOpen ? 'text-left px-4' : 'text-center'}`}>
                 {isSidebarOpen && (
                     <p className="text-xs text-gray-400 dark:text-gray-500 break-all">App ID: {appId}</p>
                 )}
@@ -2084,7 +2099,7 @@ const Sidebar = ({ isDarkMode, handleNavClick, isSidebarOpen, toggleSidebar, vie
 };
 
 // --- TopBar Component ---
-const TopBar = ({ toggleTheme, isDarkMode, user, openComposer, openLoginModal, handleLogout, notifications = [], onClearNotification, isNotificationPanelOpen, toggleNotificationPanel, isProfileDropdownOpen, toggleProfileDropdown, onNavigateToProfile }) => {
+const TopBar = ({ toggleTheme, isDarkMode, user, openComposer, openLoginModal, handleLogout, notifications = [], onClearNotification, isNotificationPanelOpen, toggleNotificationPanel, isProfileDropdownOpen, toggleProfileDropdown, onNavigateToProfile, userPlan }) => {
     // Check if user is logged in with a real account (not anonymous)
     const isRealUser = user && !user.isAnonymous && (user.email || user.displayName);
     const unreadCount = notifications.filter(n => !n.read).length;
@@ -2107,6 +2122,16 @@ const TopBar = ({ toggleTheme, isDarkMode, user, openComposer, openLoginModal, h
 
             {/* Action Items */}
             <div className="flex items-center space-x-3 ml-4">
+                {/* Ad for Basic Plan in Top Bar */}
+                {userPlan === 'basic' && (
+                    <button
+                        onClick={() => openComposer()} // Or navigate to billing
+                        className="hidden md:flex items-center gap-2 px-3 py-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 text-white rounded-full text-xs font-bold shadow-md hover:scale-105 transition-transform"
+                    >
+                        <Zap size={12} fill="currentColor" />
+                        <span>Upgrade</span>
+                    </button>
+                )}
                 <button
                     onClick={openComposer}
                     className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg shadow-md hover:bg-blue-700 transition-colors text-sm font-semibold"
@@ -2186,6 +2211,7 @@ const TopBar = ({ toggleTheme, isDarkMode, user, openComposer, openLoginModal, h
                                 <img
                                     src={user.photoURL}
                                     alt="User avatar"
+                                    referrerPolicy="no-referrer"
                                     className="w-8 h-8 rounded-full border-2 border-blue-500"
                                 />
                             ) : (
@@ -2210,6 +2236,7 @@ const TopBar = ({ toggleTheme, isDarkMode, user, openComposer, openLoginModal, h
                                             <img
                                                 src={user.photoURL}
                                                 alt="User avatar"
+                                                referrerPolicy="no-referrer"
                                                 className="w-12 h-12 rounded-full border-2 border-white/50"
                                             />
                                         ) : (
@@ -2667,8 +2694,15 @@ const TrendingSidebarContent = ({ openTrendingModal, onManageInterests, trending
 );
 
 
-const DashboardContent = ({ scheduledPosts, integrationsRef, isTargetingIntegrations, openTrendingModal, platformConnections, handleNavClick, hasInterests, db, userId, onDeleteFromPlatform, deleting, onNavigateToCalendar, highlightedDate, onDeleteScheduledPost, onCancelAllScheduledPosts, trendingTopics, loadingTrending, trendingError, onRefreshTrending }) => (
+const DashboardContent = ({ scheduledPosts, integrationsRef, isTargetingIntegrations, openTrendingModal, platformConnections, handleNavClick, hasInterests, db, userId, onDeleteFromPlatform, deleting, onNavigateToCalendar, highlightedDate, onDeleteScheduledPost, onCancelAllScheduledPosts, trendingTopics, loadingTrending, trendingError, onRefreshTrending, userPlan }) => (
     <div className="p-6 space-y-6">
+        {/* Ad Banner for Basic Plan */}
+        {userPlan === 'basic' && (
+            <div className="mb-6">
+                <AdBanner userPlan={userPlan} />
+            </div>
+        )}
+
         {/* Section 1: Platforms */}
         <div>
             <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-4">
@@ -2714,6 +2748,8 @@ const DashboardContent = ({ scheduledPosts, integrationsRef, isTargetingIntegrat
                 </button>
             </div>
         </div>
+
+
 
         {/* Section 2: Trending Content (Limited view with Explore more) */}
         <TrendingContent
@@ -2936,6 +2972,142 @@ const TrendingDetailModal = ({ isOpen, onClose, topic, onDraft, onUpdateImage })
 };
 
 
+// --- Onboarding Modal Component ---
+const OnboardingModal = ({ isOpen, userId, db, onComplete }) => {
+    const [formData, setFormData] = useState({
+        username: '',
+        gender: '',
+        dateOfBirth: ''
+    });
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState(null);
+
+    // Load initial data (e.g. from Auth provider)
+    useEffect(() => {
+        if (isOpen && userId && db) {
+            // Optional: Fetch existing incomplete data if needed
+            // For now, we assume if it's open, we need fresh input or just use what we have locally if we were lifting state
+        }
+    }, [isOpen, userId, db]);
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setError(null);
+
+        if (!formData.username.trim() || !formData.gender || !formData.dateOfBirth) {
+            setError('Please fill in all fields to continue.');
+            return;
+        }
+
+        setLoading(true);
+        try {
+            // using top-level imports
+            const userRef = doc(db, 'users', userId);
+
+            await setDoc(userRef, {
+                username: formData.username,
+                gender: formData.gender,
+                dateOfBirth: formData.dateOfBirth,
+                onboardingCompleted: true,
+                updatedAt: serverTimestamp()
+            }, { merge: true });
+
+            onComplete();
+        } catch (err) {
+            console.error("Error saving profile:", err);
+            setError("Failed to save details. Please try again.");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/80 backdrop-blur-sm p-4 animate-fade-in">
+            <div className="bg-white dark:bg-gray-800 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden border border-gray-100 dark:border-gray-700">
+                <div className="p-8">
+                    <div className="text-center mb-8">
+                        <div className="mx-auto w-16 h-16 bg-blue-100 dark:bg-blue-900/50 rounded-full flex items-center justify-center mb-4">
+                            <User size={32} className="text-blue-600 dark:text-blue-400" />
+                        </div>
+                        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">Welcome!</h2>
+                        <p className="text-gray-500 dark:text-gray-400">
+                            Let's set up your profile to personalize your experience.
+                        </p>
+                    </div>
+
+                    <form onSubmit={handleSubmit} className="space-y-5">
+                        {error && (
+                            <div className="p-3 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-sm rounded-lg flex items-center">
+                                <AlertTriangle size={16} className="mr-2 flex-shrink-0" />
+                                {error}
+                            </div>
+                        )}
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Username / Display Name</label>
+                            <input
+                                type="text"
+                                value={formData.username}
+                                onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                                className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 transition-all outline-none"
+                                placeholder="How should we call you?"
+                            />
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Gender</label>
+                            <div className="grid grid-cols-3 gap-3">
+                                {['Male', 'Female', 'Other'].map((option) => (
+                                    <button
+                                        key={option}
+                                        type="button"
+                                        onClick={() => setFormData({ ...formData, gender: option.toLowerCase() })}
+                                        className={`py-2.5 px-2 rounded-lg text-sm font-medium border transition-all ${formData.gender === option.toLowerCase()
+                                            ? 'bg-blue-600 text-white border-blue-600 shadow-md'
+                                            : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'
+                                            }`}
+                                    >
+                                        {option}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Date of Birth</label>
+                            <input
+                                type="date"
+                                value={formData.dateOfBirth}
+                                onChange={(e) => setFormData({ ...formData, dateOfBirth: e.target.value })}
+                                className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 transition-all outline-none"
+                            />
+                        </div>
+
+                        <button
+                            type="submit"
+                            disabled={loading}
+                            className={`w-full py-3.5 rounded-xl text-white font-bold text-lg shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-0.5 ${loading ? 'bg-blue-400 cursor-not-allowed' : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700'
+                                }`}
+                        >
+                            {loading ? (
+                                <span className="flex items-center justify-center gap-2">
+                                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                    Saving...
+                                </span>
+                            ) : (
+                                "Get Started →"
+                            )}
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+
 // --- Full-Screen Integration View Component ---
 
 const AuthFields = ({ platformId, loading, mobileNumber, setMobileNumber, otpInput, setOtpInput, handleSendOTP, handleVerifyOTP, handleLogin }) => {
@@ -2950,44 +3122,27 @@ const AuthFields = ({ platformId, loading, mobileNumber, setMobileNumber, otpInp
     const [otpFlow, setOtpFlow] = useState('phone_input'); // Re-initiate OTP flow state here for this component
 
     // --- Standard Login Fields (Email/Password or UserID/Password) ---
+    // MODIFIED: For OAuth platforms, we don't need user input.
     if (isEmailPassword || isUserIdPassword) {
-        const primaryLabel = isEmailPassword ? 'Email Address' : 'User ID';
-        const primaryType = isEmailPassword ? 'email' : 'text';
-
         return (
             <div className="w-full">
-                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                    {isEmailPassword ? 'Sign in using your account email and password.' : 'Sign in using your user ID and password.'}
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
+                    Connect your account securely via OAuth. You will be redirected to the provider's login page.
                 </p>
-                <div className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">{primaryLabel}</label>
-                        <input
-                            type={primaryType}
-                            value={emailOrUser}
-                            onChange={(e) => setEmailOrUser(e.target.value)}
-                            className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-                            placeholder={`Enter ${primaryLabel}`}
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Password</label>
-                        <input
-                            type="password"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-                            placeholder="Enter Password"
-                        />
-                    </div>
-                </div>
                 <button
                     onClick={() => handleLogin(platformId)}
                     disabled={loading}
-                    className={`w-full mt-6 py-3 rounded-lg text-lg font-semibold text-white transition-colors ${loading ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
+                    className={`w-full py-3 rounded-lg text-lg font-semibold text-white transition-colors flex items-center justify-center gap-2 ${loading ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
                         }`}
                 >
-                    {loading ? 'Redirecting...' : `Connect with ${isEmailPassword ? 'OAuth' : 'OAuth'}`}
+                    {loading ? (
+                        <>
+                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                            Redirecting...
+                        </>
+                    ) : (
+                        `Connect with ${PLATFORMS.find(p => p.id === platformId)?.name || 'Account'}`
+                    )}
                 </button>
             </div>
         );
@@ -3671,6 +3826,28 @@ const SettingsContent = ({ db, userId, user }) => {
                             </div>
 
                             {/* Fields */}
+                            {/* Profile Photo Display */}
+                            <div className="mb-6 flex items-center gap-4">
+                                <div className="relative">
+                                    {user?.photoURL ? (
+                                        <img
+                                            src={user.photoURL}
+                                            alt="Profile"
+                                            referrerPolicy="no-referrer"
+                                            className="w-16 h-16 rounded-full border-2 border-gray-200 dark:border-gray-700 shadow-sm object-cover"
+                                        />
+                                    ) : (
+                                        <div className="w-16 h-16 rounded-full bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center text-blue-600 dark:text-blue-400 font-bold text-2xl border-2 border-gray-200 dark:border-gray-700">
+                                            {(profileData.username || user?.displayName || user?.email || 'U').charAt(0).toUpperCase()}
+                                        </div>
+                                    )}
+                                </div>
+                                <div>
+                                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Profile Photo</p>
+                                    <p className="text-xs text-gray-500 dark:text-gray-400">Synced from your login account</p>
+                                </div>
+                            </div>
+
                             <div className="space-y-4">
                                 <div>
                                     <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Username</label>
@@ -3859,7 +4036,7 @@ const AnalyticsContent = () => (
 
 
 // --- Composer 2.0 Full-Page View ---
-const ComposerContent = ({ db, userId, platformConnections, addToast, addNotification, onUnsavedContentChange, saveDraftRef, initialData, onClearInitialData }) => {
+const ComposerContent = ({ db, userId, platformConnections, addToast, addNotification, onUnsavedContentChange, saveDraftRef, initialData, onClearInitialData, userPlan, monthlyPostCount, scheduledPostsCount, updateUserUsage }) => {
     // Post content state
     const [content, setContent] = useState('');
     const [selectedPlatforms, setSelectedPlatforms] = useState([]);
@@ -3945,6 +4122,10 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
     // Loading/status state
     const [loading, setLoading] = useState(false);
     const [statusMessage, setStatusMessage] = useState(null);
+    const [isAiRefining, setIsAiRefining] = useState(false);
+    const [selectedTone, setSelectedTone] = useState('Professional');
+    const TONES = ['Professional', 'Casual', 'Funny', 'Excited', 'Witty', 'Sarcastic', 'Dramatic', 'Grumpy'];
+    const BASIC_TONES = ['Professional', 'Casual', 'Excited'];
     const [regenCooldown, setRegenCooldown] = useState(0); // Cooldown for regenerate button
 
     // Auto-dismiss status messages after 3 seconds
@@ -4048,6 +4229,63 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
             setImageBase64(reader.result.split(',')[1]);
         };
         reader.readAsDataURL(file);
+    };
+
+    const handleRefineContent = async () => {
+        if (!content.trim()) return;
+
+        if (!userId) {
+            addToast('Please log in to use AI refinement.', 'error');
+            return;
+        }
+
+        // Basic Plan Restriction: Word Limit for AI
+        if (userPlan === 'basic') {
+            const wordCount = content.trim().split(/\s+/).length;
+            if (wordCount > 100) {
+                setStatusMessage({ type: 'error', text: 'Basic plan limit: Please reduce content to under 100 words for AI refinement.' });
+                return;
+            }
+        }
+        // Pro Plan Restriction: Word Limit for AI
+        if (userPlan === 'pro') {
+            const wordCount = content.trim().split(/\s+/).length;
+            if (wordCount > 1000) {
+                setStatusMessage({ type: 'error', text: 'Pro plan limit: Please reduce content to under 1000 words for AI refinement.' });
+                return;
+            }
+        }
+
+        // Basic Plan Restriction: Tones
+        // Uses component-level BASIC_TONES constant
+        if (userPlan === 'basic' && selectedTone && !BASIC_TONES.includes(selectedTone)) {
+            setStatusMessage({ type: 'error', text: `Basic plan is limited to ${BASIC_TONES.join(', ')} tones. Upgrade to Pro.` });
+            return;
+        }
+
+        setIsAiRefining(true);
+        console.log(`🤖 Refining content for user ${userId} with tone ${selectedTone}`);
+
+        try {
+            const result = await aiService.refineContent(content, userId, selectedTone);
+
+            if (result.success && result.refined_content) {
+                setContent(result.refined_content);
+                addToast('Content refined by AI successfully!', 'success');
+
+                // Show suggestions if available (optional enhancement)
+                if (result.suggestions && result.suggestions.length > 0) {
+                    console.log('AI Suggestions:', result.suggestions);
+                }
+            } else {
+                throw new Error(result.error || 'Failed to refine content');
+            }
+        } catch (error) {
+            console.error('Refinement failed:', error);
+            addToast(`Refinement failed: ${error.message}`, 'error');
+        } finally {
+            setIsAiRefining(false);
+        }
     };
 
     const removeImage = () => {
@@ -4304,6 +4542,17 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
             return;
         }
 
+        // Basic Plan Restriction: Monthly Post Limit
+        if (userPlan === 'basic' && monthlyPostCount >= 14) {
+            setStatusMessage({ type: 'error', text: 'Basic plan limit reached (14 posts/month). Upgrade to Pro.' });
+            return;
+        }
+        // Pro Plan Restriction: Monthly Post Limit
+        if (userPlan === 'pro' && monthlyPostCount >= 35) {
+            setStatusMessage({ type: 'error', text: 'Pro plan limit reached (35 posts/month). Upgrade to Enterprise.' });
+            return;
+        }
+
         setLoading(true);
         setStatusMessage({ type: 'info', text: '⏳ Posting...' });
 
@@ -4355,6 +4604,11 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
                 console.log('✅ [COMPOSER] Saved to Firestore for calendar');
             }
 
+            // Update Usage Stats
+            if (updateUserUsage) {
+                updateUserUsage('post');
+            }
+
             setStatusMessage({ type: 'success', text: '✅ Posted successfully! Check your calendar.' });
 
             // Reset form after 2 seconds so user can see success message
@@ -4390,6 +4644,17 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
             return;
         }
 
+        // Basic Plan Restriction: Scheduled Post Limit
+        if (userPlan === 'basic' && scheduledPostsCount >= 2) {
+            setStatusMessage({ type: 'error', text: 'Basic plan limit reached (2 scheduled posts). Upgrade to Pro.' });
+            return;
+        }
+        // Pro Plan Restriction: Scheduled Post Limit
+        if (userPlan === 'pro' && scheduledPostsCount >= 15) {
+            setStatusMessage({ type: 'error', text: 'Pro plan limit reached (15 scheduled posts). Upgrade to Enterprise.' });
+            return;
+        }
+
         setLoading(true);
         try {
             const path = `users/${userId}/scheduled_posts`;
@@ -4405,6 +4670,11 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
                 status: 'pending',
                 createdAt: serverTimestamp(),
             });
+
+            // Update Usage Stats
+            if (updateUserUsage) {
+                updateUserUsage('schedule');
+            }
 
             setStatusMessage({ type: 'success', text: '📅 Post scheduled!' });
             addNotification?.({ type: 'scheduled', message: `Post scheduled for ${scheduledTime.toLocaleString()}` });
@@ -4644,6 +4914,42 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
                                         <div>
                                             <p className="font-semibold text-gray-900 dark:text-gray-100 text-sm">Your Name</p>
                                             <p className="text-xs text-gray-500">Just now • 🌐</p>
+                                        </div>
+                                    </div>
+
+                                    {/* Refine Controls */}
+                                    <div className="flex flex-col gap-2 mb-2">
+                                        <div className="flex items-center justify-between">
+                                            <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
+                                                {TONES.map(tone => {
+                                                    const BASIC_TONES = ['Professional', 'Casual', 'Excited'];
+                                                    const isLocked = userPlan === 'basic' && !BASIC_TONES.includes(tone);
+                                                    return (
+                                                        <button
+                                                            key={tone}
+                                                            onClick={() => !isLocked && setSelectedTone(tone)}
+                                                            className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors whitespace-nowrap flex items-center gap-1 ${selectedTone === tone
+                                                                ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 border-purple-300 dark:border-purple-600'
+                                                                : isLocked
+                                                                    ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 border-gray-200 dark:border-gray-700 cursor-not-allowed opacity-60'
+                                                                    : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
+                                                                }`}
+                                                        >
+                                                            {tone}
+                                                            {isLocked && <Lock size={10} />}
+                                                        </button>
+                                                    )
+                                                })}
+                                            </div>
+                                            <button
+                                                onClick={handleRefineContent}
+                                                disabled={isAiRefining || !content.trim()}
+                                                className="px-3 py-1 rounded-lg bg-purple-600 hover:bg-purple-700 text-white text-xs font-medium transition-colors flex items-center gap-1 shrink-0"
+                                                title={userPlan === 'basic' ? "Refine (<100 words)" : "Refine with AI"}
+                                            >
+                                                <Sparkles size={12} className={isAiRefining ? "animate-spin" : ""} />
+                                                {isAiRefining ? 'Refining...' : 'Refine'}
+                                            </button>
                                         </div>
                                     </div>
 
@@ -4950,6 +5256,44 @@ const App = () => {
     // --- NEW ONBOARDING STATE ---
     const [interestsCompleted, setInterestsCompleted] = useState(null); // null, true, or false
 
+    // --- BILLING STATE ---
+    const [userPlan, setUserPlan] = useState('basic'); // default to basic
+    const [monthlyPostCount, setMonthlyPostCount] = useState(0);
+    const [scheduledPostsCount, setScheduledPostsCount] = useState(0);
+
+    useEffect(() => {
+        if (!db || !userId) return;
+
+        // Fetch user plan and usage from Firestore
+        const usageDocRef = doc(db, `users/${userId}/preferences/usage`);
+        const unsubUsage = onSnapshot(usageDocRef, (docSnap) => {
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                setMonthlyPostCount(data.monthlyPostCount || 0);
+                setScheduledPostsCount(data.scheduledPostsCount || 0);
+                // Plan could be stored here or in the main user doc. Assuming default 'basic' for now.
+                // If plan is stored in user doc, we'd fetch it there.
+            } else {
+                // Initialize usage doc if not exists
+                setDoc(usageDocRef, { monthlyPostCount: 0, scheduledPostsCount: 0 }, { merge: true });
+            }
+        });
+
+        return () => unsubUsage();
+    }, [db, userId]);
+
+    const updateUserUsage = useCallback((type) => {
+        if (!db || !userId) return;
+        const usageDocRef = doc(db, `users/${userId}/preferences/usage`);
+        const { increment } = require('firebase/firestore'); // Import locally to avoid top-level conflict if needed
+
+        if (type === 'post') {
+            setDoc(usageDocRef, { monthlyPostCount: increment(1) }, { merge: true });
+        } else if (type === 'schedule') {
+            setDoc(usageDocRef, { scheduledPostsCount: increment(1) }, { merge: true });
+        }
+    }, [db, userId]);
+
     // --- TRENDING TOPICS STATE ---
     const [trendingTopics, setTrendingTopics] = useState([]);
     const [loadingTrending, setLoadingTrending] = useState(false);
@@ -5092,6 +5436,46 @@ const App = () => {
         });
     }, []);
 
+    // --- ONBOARDING LOGIC ---
+    const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
+    const [hasCheckedOnboarding, setHasCheckedOnboarding] = useState(false);
+
+    useEffect(() => {
+        if (!user || !db || !userId) return;
+
+        // Don't check again if we've already determined the status for this session/user match
+        // But we need to listen for real-time updates in case they update settings elsewhere
+
+        // Using top-level imports for doc and onSnapshot
+
+        const unsub = onSnapshot(doc(db, 'users', userId), (docSnap) => {
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                // Check if critical fields are missing
+                const isProfileComplete =
+                    data.username &&
+                    data.gender &&
+                    data.dateOfBirth;
+
+                // Also check a specific flag if we want to be explicit
+                // But user asked for "if fields are there" logic implied.
+
+                if (!isProfileComplete && !data.onboardingCompleted) {
+                    setIsOnboardingOpen(true);
+                } else {
+                    setIsOnboardingOpen(false);
+                }
+            } else {
+                // User doc doesn't exist yet - trigger onboarding
+                setIsOnboardingOpen(true);
+            }
+            setHasCheckedOnboarding(true);
+        });
+
+        return () => unsub();
+    }, [user, db, userId]);
+    // --- END ONBOARDING LOGIC ---
+
 
     // Delete from platform state and handler
     const [deleting, setDeleting] = useState(false);
@@ -5228,8 +5612,8 @@ const App = () => {
 
         window.addEventListener('popstate', handlePopState);
 
-        // Set initial state so first back works
-        window.history.replaceState({ view: 'dashboard' }, '', window.location.hash || '#dashboard');
+        // Ensure URLs always match the current view (force Dashboard on reload regardless of hash)
+        window.history.replaceState({ view }, '', `#${view}`);
 
         return () => window.removeEventListener('popstate', handlePopState);
     }, [view, composerHasUnsavedContent]);
@@ -5514,6 +5898,7 @@ const App = () => {
                     loadingTrending={loadingTrending}
                     trendingError={trendingError}
                     onRefreshTrending={() => loadTrendingTopics(true)}
+                    userPlan={userPlan}
                 />;
             case 'analytics':
                 return <AnalyticsPage />;
@@ -5535,6 +5920,8 @@ const App = () => {
                 />;
             case 'settings':
                 return <SettingsContent db={db} userId={userId} user={user} />;
+            case 'billing':
+                return <Billing userPlan={userPlan} monthlyPostCount={monthlyPostCount} scheduledPostsCount={scheduledPostsCount} />;
             case 'composer':
                 return <ComposerContent
                     db={db}
@@ -5546,6 +5933,10 @@ const App = () => {
                     saveDraftRef={composerSaveDraftRef}
                     initialData={pendingDraft}
                     onClearInitialData={() => setPendingDraft(null)}
+                    userPlan={userPlan}
+                    monthlyPostCount={monthlyPostCount}
+                    scheduledPostsCount={scheduledPostsCount}
+                    updateUserUsage={updateUserUsage}
                 />;
             default:
                 // Defaulting to DashboardContent
@@ -5610,6 +6001,7 @@ const App = () => {
                         toggleSidebar={toggleSidebar}
                         view={view}
                         user={user}
+                        userPlan={userPlan}
                     />
                     <main ref={mainContentRef} className="flex-1 flex flex-col overflow-y-auto">
                         <TopBar
@@ -5625,7 +6017,9 @@ const App = () => {
                             toggleNotificationPanel={toggleNotificationPanel}
                             isProfileDropdownOpen={isProfileDropdownOpen}
                             toggleProfileDropdown={toggleProfileDropdown}
+                            toggleProfileDropdown={toggleProfileDropdown}
                             onNavigateToProfile={() => handleNavClick('settings')}
+                            userPlan={userPlan}
                         />
                         {renderContent()}
                     </main>
@@ -5697,6 +6091,14 @@ const App = () => {
                     </div>
                 </div>
             )}
+
+            {/* Onboarding Modal */}
+            <OnboardingModal
+                isOpen={isOnboardingOpen}
+                userId={userId}
+                db={db}
+                onComplete={() => setIsOnboardingOpen(false)}
+            />
         </>
     );
 };

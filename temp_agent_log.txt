@@ -1,0 +1,100 @@
+﻿  File "C:\Users\ADMIN\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(typ, value, traceback)
+  File "D:\SocialConnectIQ\services\agent-service\venv\Lib\site-packages\starlette\_utils.py", line 85, in collapse_excgroups
+    raise exc
+  File "D:\SocialConnectIQ\services\agent-service\venv\Lib\site-packages\starlette\middleware\base.py", line 193, in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\SocialConnectIQ\services\agent-service\app\main.py", line 189, in add_correlation_id
+    correlation_logger.request_start(
+  File "D:\SocialConnectIQ\shared\logging_utils.py", line 176, in request_start
+    self.info(
+  File "D:\SocialConnectIQ\shared\logging_utils.py", line 112, in info
+    print(console_msg)
+  File "C:\Users\ADMIN\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode characters in position 0-1: character maps to <undefined>
+2026-01-11 11:35:17 - {"timestamp": "2026-01-11T06:05:17.624316Z", "level": "INFO", "service": "AGENT-SERVICE", "correlation_id": "c9cda32c-dd61-4498-8d7b-9de98cbea155", "user_id": "N/A", "message": "\ud83d\udd35 REQUEST START: GET /health", "data": {"endpoint": "/health", "method": "GET"}}
+2026-01-11 11:35:17,624 - AGENT-SERVICE_correlation - INFO - {"timestamp": "2026-01-11T06:05:17.624316Z", "level": "INFO", "service": "AGENT-SERVICE", "correlation_id": "c9cda32c-dd61-4498-8d7b-9de98cbea155", "user_id": "N/A", "message": "\ud83d\udd35 REQUEST START: GET /health", "data": {"endpoint": "/health", "method": "GET"}}
+INFO:     127.0.0.1:59369 - "GET /health HTTP/1.1" 500 Internal Server Error
+ERROR:    Exception in ASGI application
+  + Exception Group Traceback (most recent call last):
+  |   File "D:\SocialConnectIQ\services\agent-service\venv\Lib\site-packages\starlette\_utils.py", line 79, in collapse_excgroups
+  |     yield
+  |   File "D:\SocialConnectIQ\services\agent-service\venv\Lib\site-packages\starlette\middleware\base.py", line 192, in __call__
+  |     async with anyio.create_task_group() as task_group:
+  |   File "D:\SocialConnectIQ\services\agent-service\venv\Lib\site-packages\anyio\_backends\_asyncio.py", line 783, in __aexit__
+  |     raise BaseExceptionGroup(
+  | ExceptionGroup: unhandled errors in a TaskGroup (1 sub-exception)
+  +-+---------------- 1 ----------------
+    | Traceback (most recent call last):
+    |   File "D:\SocialConnectIQ\services\agent-service\venv\Lib\site-packages\uvicorn\protocols\http\httptools_impl.py", line 409, in run_asgi
+    |     result = await app(  # type: ignore[func-returns-value]
+    |              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "D:\SocialConnectIQ\services\agent-service\venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 60, in __call__
+    |     return await self.app(scope, receive, send)
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "D:\SocialConnectIQ\services\agent-service\venv\Lib\site-packages\fastapi\applications.py", line 1135, in __call__
+    |     await super().__call__(scope, receive, send)
+    |   File "D:\SocialConnectIQ\services\agent-service\venv\Lib\site-packages\starlette\applications.py", line 107, in __call__
+    |     await self.middleware_stack(scope, receive, send)
+    |   File "D:\SocialConnectIQ\services\agent-service\venv\Lib\site-packages\starlette\middleware\errors.py", line 186, in __call__
+    |     raise exc
+    |   File "D:\SocialConnectIQ\services\agent-service\venv\Lib\site-packages\starlette\middleware\errors.py", line 164, in __call__
+    |     await self.app(scope, receive, _send)
+    |   File "D:\SocialConnectIQ\services\agent-service\venv\Lib\site-packages\starlette\middleware\base.py", line 191, in __call__
+    |     with recv_stream, send_stream, collapse_excgroups():
+    |   File "C:\Users\ADMIN\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 158, in __exit__
+    |     self.gen.throw(typ, value, traceback)
+    |   File "D:\SocialConnectIQ\services\agent-service\venv\Lib\site-packages\starlette\_utils.py", line 85, in collapse_excgroups
+    |     raise exc
+    |   File "D:\SocialConnectIQ\services\agent-service\venv\Lib\site-packages\starlette\middleware\base.py", line 193, in __call__
+    |     response = await self.dispatch_func(request, call_next)
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |   File "D:\SocialConnectIQ\services\agent-service\app\main.py", line 189, in add_correlation_id
+    |   File "D:\SocialConnectIQ\shared\logging_utils.py", line 176, in request_start
+    |     self.info(
+    |   File "D:\SocialConnectIQ\shared\logging_utils.py", line 112, in info
+    |     print(console_msg)
+    |   File "C:\Users\ADMIN\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    |     return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+    |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    | UnicodeEncodeError: 'charmap' codec can't encode characters in position 0-1: character maps to <undefined>
+    +------------------------------------
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "D:\SocialConnectIQ\services\agent-service\venv\Lib\site-packages\uvicorn\protocols\http\httptools_impl.py", line 409, in run_asgi
+    result = await app(  # type: ignore[func-returns-value]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\SocialConnectIQ\services\agent-service\venv\Lib\site-packages\uvicorn\middleware\proxy_headers.py", line 60, in __call__
+    return await self.app(scope, receive, send)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\SocialConnectIQ\services\agent-service\venv\Lib\site-packages\fastapi\applications.py", line 1135, in __call__
+    await super().__call__(scope, receive, send)
+  File "D:\SocialConnectIQ\services\agent-service\venv\Lib\site-packages\starlette\applications.py", line 107, in __call__
+    await self.middleware_stack(scope, receive, send)
+  File "D:\SocialConnectIQ\services\agent-service\venv\Lib\site-packages\starlette\middleware\errors.py", line 186, in __call__
+    raise exc
+  File "D:\SocialConnectIQ\services\agent-service\venv\Lib\site-packages\starlette\middleware\errors.py", line 164, in __call__
+    await self.app(scope, receive, _send)
+  File "D:\SocialConnectIQ\services\agent-service\venv\Lib\site-packages\starlette\middleware\base.py", line 191, in __call__
+    with recv_stream, send_stream, collapse_excgroups():
+  File "C:\Users\ADMIN\AppData\Local\Programs\Python\Python311\Lib\contextlib.py", line 158, in __exit__
+    self.gen.throw(typ, value, traceback)
+  File "D:\SocialConnectIQ\services\agent-service\venv\Lib\site-packages\starlette\_utils.py", line 85, in collapse_excgroups
+    raise exc
+  File "D:\SocialConnectIQ\services\agent-service\venv\Lib\site-packages\starlette\middleware\base.py", line 193, in __call__
+    response = await self.dispatch_func(request, call_next)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\SocialConnectIQ\services\agent-service\app\main.py", line 189, in add_correlation_id
+  File "D:\SocialConnectIQ\shared\logging_utils.py", line 176, in request_start
+    self.info(
+  File "D:\SocialConnectIQ\shared\logging_utils.py", line 112, in info
+    print(console_msg)
+  File "C:\Users\ADMIN\AppData\Local\Programs\Python\Python311\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode characters in position 0-1: character maps to <undefined>

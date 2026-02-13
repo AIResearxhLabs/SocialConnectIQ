@@ -781,6 +781,262 @@ async def post_to_linkedin_with_image(post_request: PostWithImageRequest):
             print(traceback.format_exc())
             raise HTTPException(status_code=500, detail=f"Error posting to LinkedIn: {str(exc)}")
 
+
+# Twitter/X OAuth Endpoints
+@app.post("/api/integrations/twitter/auth")
+async def twitter_auth(request: Request, user_id: str = Header(..., alias="X-User-ID")):
+    """
+    Initiate Twitter OAuth flow via Agent Service (LLM + MCP integration)
+    """
+    # Extract or generate correlation ID
+    correlation_id = get_correlation_id_from_headers(dict(request.headers)) or generate_correlation_id()
+    
+    print("\n" + "="*100)
+    print("🐦 [INTEGRATION-SERVICE] Twitter Auth Request Received")
+    print("="*100)
+    
+    # Log request start
+    logger.request_start(
+        correlation_id=correlation_id,
+        endpoint="/api/integrations/twitter/auth",
+        method="POST",
+        user_id=user_id
+    )
+    
+    try:
+        # Delegate to Agent Service
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            print(f"📡 [INTEGRATION-SERVICE] Calling Agent Service at {AGENT_SERVICE_URL}")
+            
+            agent_response = await client.post(
+                f"{AGENT_SERVICE_URL}/agent/twitter/auth",
+                json={"user_id": user_id},
+                headers={"X-Correlation-ID": correlation_id}
+            )
+            
+            if agent_response.status_code != 200:
+                print(f"❌ [INTEGRATION-SERVICE] Agent Service error: {agent_response.text}")
+                raise HTTPException(
+                    status_code=agent_response.status_code,
+                    detail=f"Agent Service error: {agent_response.text}"
+                )
+            
+            agent_data = agent_response.json()
+            
+            if not agent_data.get("success"):
+                error_msg = agent_data.get("error", "Unknown error from Agent Service")
+                raise HTTPException(status_code=500, detail=error_msg)
+            
+            auth_url = agent_data.get("auth_url")
+            state = agent_data.get("state") # PKCE state
+            code_verifier = agent_data.get("code_verifier") or agent_data.get("codeVerifier") # PKCE verifier
+
+            print(f"✅ [INTEGRATION-SERVICE] Received auth_url from Agent Service")
+            
+            # Store state AND code_verifier in Firestore for callback validation
+            if state and db is not None:
+                try:
+                    state_data = {
+                        'user_id': user_id,
+                        'platform': 'twitter',
+                        'code_verifier': code_verifier, # Crucial for PKCE
+                        'created_at': firestore.SERVER_TIMESTAMP,
+                        'expires_at': datetime.utcnow().timestamp() + 600  # 10 minutes
+                    }
+                    db.collection('oauth_states').document(state).set(state_data)
+                    print(f"💾 [INTEGRATION-SERVICE] State and Verifier stored in Firestore")
+                except Exception as e:
+                    print(f"⚠️  [INTEGRATION-SERVICE] Warning: Could not store state: {str(e)}")
+            
+            logger.request_end(
+                correlation_id=correlation_id,
+                endpoint="/api/integrations/twitter/auth",
+                status_code=200,
+                user_id=user_id
+            )
+            
+            return {"auth_url": auth_url, "state": state}
+            
+    except Exception as e:
+        logger.error(f"Error in twitter_auth", correlation_id=correlation_id, user_id=user_id, additional_data={"error": str(e)})
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/integrations/twitter/callback")
+async def twitter_callback(code: str, state: Optional[str] = None, error: Optional[str] = None):
+    """Handle Twitter OAuth callback via Agent Service"""
+    print("\n" + "="*100)
+    print("🐦 [INTEGRATION-SERVICE] Twitter Callback Received")
+    print("="*100)
+    
+    if error:
+        return RedirectResponse(
+            url=f"http://localhost:3000/oauth-callback.html?status=error&platform=twitter&message={error}"
+        )
+
+    try:
+        # 1. Validate state and get user_id + code_verifier
+        user_id = None
+        code_verifier = None
+        
+        if state and db is not None:
+            state_doc = db.collection('oauth_states').document(state).get()
+            
+            if state_doc.exists:
+                state_data = state_doc.to_dict()
+                user_id = state_data.get('user_id')
+                code_verifier = state_data.get('code_verifier')
+                print(f"✅ [INTEGRATION-SERVICE] State found! User ID: {user_id}")
+            else:
+                print(f"❌ [INTEGRATION-SERVICE] State document NOT FOUND in Firestore!")
+                return RedirectResponse(
+                    url=f"http://localhost:3000/oauth-callback.html?status=error&platform=twitter&message=invalid_state"
+                )
+        else:
+             return RedirectResponse(
+                url=f"http://localhost:3000/oauth-callback.html?status=error&platform=twitter&message=missing_state_or_db"
+            )
+        
+        # 2. Route to Agent Service
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            agent_response = await client.post(
+                f"{AGENT_SERVICE_URL}/agent/twitter/handle-callback",
+                json={
+                    "code": code,
+                    "user_id": user_id,
+                    "code_verifier": code_verifier # Required for Twitter PKCE
+                }
+            )
+            
+            if agent_response.status_code != 200:
+                return RedirectResponse(
+                    url=f"http://localhost:3000/oauth-callback.html?status=error&platform=twitter&message=agent_error"
+                )
+            
+            agent_data = agent_response.json()
+            
+            if not agent_data.get("success"):
+                error = agent_data.get("error", "Unknown error")
+                return RedirectResponse(
+                    url=f"http://localhost:3000/oauth-callback.html?status=error&platform=twitter&message=callback_failed"
+                )
+            
+            # 3. Extract token data
+            result = agent_data.get("result", {})
+            access_token = result.get("access_token") or result.get("accessToken")
+            refresh_token = result.get("refresh_token") or result.get("refreshToken")
+            expires_in = result.get("expires_in") or result.get("expiresIn", 7200) # Twitter tokens usually expire in 2 hours
+            platform_user_id = result.get("platform_user_id") or result.get("data", {}).get("id") or result.get("id") or ""
+            
+            if not access_token:
+                 return RedirectResponse(
+                    url=f"http://localhost:3000/oauth-callback.html?status=error&platform=twitter&message=no_token"
+                )
+
+            # 4. Save to Firestore
+            token_storage_data = {
+                "access_token": access_token,
+                "refresh_token": refresh_token or "",
+                "expires_at": datetime.utcnow().timestamp() + expires_in,
+                "platform_user_id": platform_user_id,
+            }
+            
+            save_result = await save_user_tokens(user_id, 'twitter', token_storage_data)
+            
+            if not save_result:
+                return RedirectResponse(
+                    url=f"http://localhost:3000/oauth-callback.html?status=error&platform=twitter&message=save_failed"
+                )
+            
+            # Cleanup state
+            if state and db is not None:
+                try:
+                    db.collection('oauth_states').document(state).delete()
+                except:
+                    pass
+            
+            import time
+            cache_bust = int(time.time() * 1000)
+            return RedirectResponse(
+                url=f"http://localhost:3000/oauth-callback.html?status=success&platform=twitter&_t={cache_bust}"
+            )
+
+    except Exception as e:
+        print(f"❌ [INTEGRATION-SERVICE] Unexpected error: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        return RedirectResponse(
+            url=f"http://localhost:3000/oauth-callback.html?status=error&platform=twitter&message=unexpected_error"
+        )
+
+@app.get("/api/integrations/twitter/status")
+async def twitter_status(user_id: str = Header(..., alias="X-User-ID")):
+    """Check Twitter status"""
+    tokens = await get_user_tokens(user_id, 'twitter')
+    
+    if tokens and tokens.get('connected'):
+        # Twitter tokens also expire, check expiry
+        expires_at = tokens.get('expires_at', 0)
+        current_time = datetime.utcnow().timestamp()
+        
+        # If we have a refresh token, we can treat it as connected (logic for auto-refresh would happen at usage time)
+        # But if strictly checking expiry:
+        if current_time >= expires_at and not tokens.get('refresh_token'):
+             return {
+                "connected": False,
+                "error": "token_expired",
+                "message": "Your X session has expired."
+            }
+            
+        time_until_expiry = int(expires_at - current_time)
+        return {
+            "connected": True,
+            "connected_at": tokens.get('connected_at'),
+            "platform_user_id": tokens.get('platform_user_id', ''),
+             "expires_in": time_until_expiry
+        }
+    
+    return {"connected": False}
+
+@app.post("/api/integrations/twitter/post")
+async def post_to_twitter(post_request: PostRequest):
+    """Post to Twitter via Agent Service"""
+    tokens = await get_user_tokens(post_request.user_id, 'twitter')
+    
+    if not tokens or not tokens.get('access_token'):
+        raise HTTPException(status_code=401, detail="X (Twitter) not connected.")
+        
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        try:
+             response = await client.post(
+                f"{AGENT_SERVICE_URL}/agent/twitter/post",
+                json={
+                    "content": post_request.content,
+                    "access_token": tokens.get('access_token'),
+                    "user_id": post_request.user_id
+                }
+            )
+             
+             if response.status_code == 401:
+                 raise HTTPException(status_code=401, detail="X token expired.")
+                 
+             response.raise_for_status()
+             return response.json()
+             
+        except httpx.HTTPStatusError as exc:
+             raise HTTPException(status_code=exc.response.status_code, detail=exc.response.text)
+
+@app.delete("/api/integrations/twitter/disconnect")
+async def disconnect_twitter(request: Request, user_id: str = Header(..., alias="X-User-ID")):
+    """Disconnect Twitter"""
+    from .storage import token_storage
+    correlation_id = get_correlation_id_from_headers(dict(request.headers)) or generate_correlation_id()
+    
+    success = await token_storage.disconnect_platform(user_id, 'twitter', correlation_id)
+    if not success:
+         raise HTTPException(status_code=500, detail="Failed to disconnect X")
+    return {"status": "success", "message": "X disconnected successfully"}
+
+
 @app.delete("/api/integrations/linkedin/disconnect")
 async def disconnect_linkedin(request: Request, user_id: str = Header(..., alias="X-User-ID")):
     """Disconnect LinkedIn integration and clean up OAuth states"""

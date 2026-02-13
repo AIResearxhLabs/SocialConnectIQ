@@ -17,7 +17,7 @@ import {
     orderBy
 } from "firebase/firestore";
 import { auth, db } from "./firebase";
-import { Sun, Moon, LayoutDashboard, Send, BarChart2, Settings, Zap, Facebook, Instagram, Twitter, Linkedin, Cloud, MessageSquare, LogIn, X, Clock, Image as ImageIcon, Upload, Menu, Phone, CheckCircle, AlertTriangle, ArrowLeft, ArrowRight, ThumbsUp, MessageSquare as CommentIcon, Share2, TrendingUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown, Bell, MoreVertical, Trash2, Sparkles, Eye, FileText, Save, History, CheckCircle2, Info, Hash, LogOut, Download, RefreshCw } from 'lucide-react';
+import { Sun, Moon, LayoutDashboard, Send, BarChart2, Settings, Zap, Facebook, Instagram, Twitter, Linkedin, Cloud, MessageSquare, LogIn, X, Clock, Image as ImageIcon, Upload, Menu, Phone, CheckCircle, AlertTriangle, ArrowLeft, ArrowRight, ThumbsUp, MessageSquare as CommentIcon, Share2, TrendingUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown, Bell, MoreVertical, Trash2, Sparkles, Eye, FileText, Save, History, CheckCircle2, Info, Hash, LogOut, Download, RefreshCw, Plus, Check } from 'lucide-react';
 
 // --- API INTEGRATION LAYER ---
 import {
@@ -33,12 +33,16 @@ import {
     disconnectTwitter,
     disconnectInstagram,
     disconnectWhatsApp,
+    disconnectWhatsApp,
+    postToLinkedIn, // Ensure this is imported
+    postToFacebook, // NEW: Import Facebook posting function
     fetchTrendingTopics,
     clearTrendingCache,
 } from './api/social';
 
 import { autoSignInWithLastProvider, getLastProvider } from './api/auth';
 import AnalyticsPage from './pages/AnalyticsPage';
+import UserTypeOnboarding from './components/UserTypeOnboarding';
 
 // --- GLOBAL FIREBASE VARIABLE SETUP (MANDATORY) ---
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
@@ -1346,7 +1350,7 @@ const ComposerModal = ({ isOpen, onClose, db, userId, addToast, addNotification 
                             }
                             break;
                         case 'facebook':
-                            response = await postToFacebook(content.trim());
+                            response = await postToFacebook(content.trim(), imageBase64, imageMimeType);
                             results.success.push('Facebook');
                             if (response?.post_id || response?.id) {
                                 platformPostIds.facebook = response.post_id || response.id;
@@ -3345,33 +3349,16 @@ const FullIntegrationView = ({ platformId, onBack, onComplete }) => {
 
 // --- Integrations Management Page ---
 
-const IntegrationsPageContent = ({ setFullIntegration, platformConnections, setPlatformConnections }) => { // Pass platformConnections and setter
-    // NOTE: connections state replaced by platformConnections prop to ensure synchronization
-
-    const [message, setMessage] = useState(''); // Unified message state for this page
-
-    // Effect to handle status messages from the full integration flow completion
-    // Since the full integration flow now updates platformConnections directly, we monitor that.
-    useEffect(() => {
-        // Simple hack: Check if any connection status changed to true recently (requires external timestamp/flag in real app)
-        const lastConnected = Object.keys(platformConnections).find(id => platformConnections[id] === true);
-        if (lastConnected) {
-            const platformName = PLATFORMS.find(p => p.id === lastConnected).name;
-            setMessage({ type: 'success', text: `${platformName} successfully connected!` });
-            // Optionally clear the message after a delay
-            const timer = setTimeout(() => setMessage(null), 5000);
-            return () => clearTimeout(timer);
-        }
-    }, [platformConnections]);
+const IntegrationsPageContent = ({ setFullIntegration, platformConnections, setPlatformConnections, addToast }) => {
+    // Track loading state per platform for spinner
+    const [connectingPlatform, setConnectingPlatform] = useState(null);
 
     const handleLogin = async (id) => {
         const platform = PLATFORMS.find(p => p.id === id);
 
         if (platformConnections[id]) {
-            // Disconnect logic - call real API
-            console.log(`Attempting to disconnect ${platform.name}.`);
-            setMessage({ type: 'info', text: `Disconnecting ${platform.name}...` });
-
+            // === DISCONNECT FLOW ===
+            setConnectingPlatform(id);
             try {
                 const {
                     disconnectLinkedIn,
@@ -3382,36 +3369,81 @@ const IntegrationsPageContent = ({ setFullIntegration, platformConnections, setP
                 } = await import('./api/social');
 
                 switch (id) {
-                    case 'linkedin':
-                        await disconnectLinkedIn();
-                        break;
-                    case 'facebook':
-                        await disconnectFacebook();
-                        break;
-                    case 'twitter':
-                        await disconnectTwitter();
-                        break;
-                    case 'instagram':
-                        await disconnectInstagram();
-                        break;
-                    case 'whatsapp':
-                        await disconnectWhatsApp();
-                        break;
+                    case 'linkedin': await disconnectLinkedIn(); break;
+                    case 'facebook': await disconnectFacebook(); break;
+                    case 'twitter': await disconnectTwitter(); break;
+                    case 'instagram': await disconnectInstagram(); break;
+                    case 'whatsapp': await disconnectWhatsApp(); break;
                 }
 
                 setPlatformConnections(prev => ({ ...prev, [id]: false }));
-                setMessage({ type: 'success', text: `${platform.name} disconnected successfully.` });
+                addToast(`${platform.name} disconnected successfully`, 'success');
             } catch (error) {
                 console.error(`Failed to disconnect ${platform.name}:`, error);
-                setMessage({ type: 'error', text: `Failed to disconnect ${platform.name}: ${error.message}` });
+                addToast(`Failed to disconnect ${platform.name}: ${error.message}`, 'error');
+            } finally {
+                setConnectingPlatform(null);
             }
-        } else {
-            // Initiate full-screen connection flow
-            setMessage('');
+        } else if (id === 'whatsapp') {
+            // === WHATSAPP — still needs its OTP flow ===
             setFullIntegration(id);
+        } else {
+            // === DIRECT OAUTH FLOW (LinkedIn, Facebook, Twitter, Instagram) ===
+            setConnectingPlatform(id);
+            try {
+                let authUrl;
+                switch (id) {
+                    case 'linkedin': authUrl = await authenticateLinkedIn(); break;
+                    case 'facebook': authUrl = await authenticateFacebook(); break;
+                    case 'twitter': authUrl = await authenticateTwitter(); break;
+                    case 'instagram': authUrl = await authenticateInstagram(); break;
+                    default: throw new Error(`Unsupported platform: ${id}`);
+                }
+
+                if (authUrl) {
+                    console.log(`🔗 [INTEGRATIONS] Opening OAuth popup for ${platform.name}`);
+                    const popup = window.open(
+                        authUrl,
+                        `${id}_oauth`,
+                        'width=600,height=700,scrollbars=yes,resizable=yes,left=200,top=100'
+                    );
+
+                    if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+                        throw new Error('Popup was blocked. Please allow popups for this site.');
+                    }
+
+                    // Poll to detect if user manually closed the popup
+                    const popupChecker = setInterval(() => {
+                        if (popup.closed) {
+                            clearInterval(popupChecker);
+                            // Only reset if still in connecting state (i.e., postMessage didn't already handle it)
+                            setConnectingPlatform(prev => {
+                                if (prev === id) {
+                                    console.log(`⚠️ [INTEGRATIONS] ${platform.name} popup was closed manually`);
+                                    addToast(`${platform.name} connection was cancelled.`, 'error');
+                                    return null;
+                                }
+                                return prev;
+                            });
+                        }
+                    }, 500);
+                } else {
+                    throw new Error('No authorization URL received from server');
+                }
+            } catch (err) {
+                console.error(`❌ Authentication error for ${id}:`, err);
+                addToast(`Connection failed: ${err.message}`, 'error');
+                setConnectingPlatform(null);
+            }
         }
     };
 
+    // Expose setConnectingPlatform so the parent OAuth handler can clear it
+    // We use a ref callback pattern via window for simplicity
+    useEffect(() => {
+        window.__clearConnectingPlatform = () => setConnectingPlatform(null);
+        return () => { delete window.__clearConnectingPlatform; };
+    }, []);
 
     return (
         <div className="p-6">
@@ -3427,28 +3459,17 @@ const IntegrationsPageContent = ({ setFullIntegration, platformConnections, setP
                     Connect your social media and cloud accounts to enable scheduling and analytics.
                 </p>
 
-                {/* Message Display */}
-                {message && (
-                    <div className={`mb-4 p-3 flex items-center rounded-lg font-medium border ${message.type === 'success'
-                        ? 'bg-green-100 text-green-700 border-green-300 dark:bg-green-900 dark:text-green-300 dark:border-green-700'
-                        : message.type === 'error'
-                            ? 'bg-red-100 text-red-700 border-red-300 dark:bg-red-900 dark:text-red-300 dark:border-red-700'
-                            : 'bg-blue-100 text-blue-700 border-blue-300 dark:bg-blue-900 dark:text-blue-300 dark:border-blue-700'
-                        }`}>
-                        {message.type === 'success' ? <CheckCircle size={18} className="mr-2" /> : <AlertTriangle size={18} className="mr-2" />}
-                        {message.text}
-                    </div>
-                )}
-
-
                 {/* Integration Blocks Grid */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {PLATFORMS.map(platform => {
                         const Icon = platform.icon;
-                        // READ from platformConnections state
                         const isConnected = platformConnections[platform.id];
+                        const isConnecting = connectingPlatform === platform.id;
 
-                        const buttonLabel = isConnected ? 'Disconnect' : 'Connect Account';
+                        let buttonLabel = isConnected ? 'Disconnect' : 'Connect Account';
+                        if (isConnecting) {
+                            buttonLabel = isConnected ? 'Disconnecting...' : 'Connecting...';
+                        }
 
                         return (
                             <div
@@ -3474,14 +3495,23 @@ const IntegrationsPageContent = ({ setFullIntegration, platformConnections, setP
                                     {platform.description}
                                 </p>
 
-                                {/* Standard Connect/Disconnect Button */}
+                                {/* Connect/Disconnect Button with spinner */}
                                 <button
                                     onClick={() => handleLogin(platform.id)}
-                                    className={`w-full py-2 rounded-lg text-sm font-semibold transition-colors ${isConnected
-                                        ? 'bg-red-500 hover:bg-red-600 text-white'
-                                        : 'bg-blue-600 hover:bg-blue-700 text-white'
+                                    disabled={isConnecting}
+                                    className={`w-full py-2 rounded-lg text-sm font-semibold transition-colors flex items-center justify-center gap-2 ${isConnecting
+                                        ? 'bg-gray-400 cursor-not-allowed text-white'
+                                        : isConnected
+                                            ? 'bg-red-500 hover:bg-red-600 text-white'
+                                            : 'bg-blue-600 hover:bg-blue-700 text-white'
                                         }`}
                                 >
+                                    {isConnecting && (
+                                        <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                        </svg>
+                                    )}
                                     {buttonLabel}
                                 </button>
                             </div>
@@ -3860,11 +3890,40 @@ const AnalyticsContent = () => (
 
 // --- Composer 2.0 Full-Page View ---
 const ComposerContent = ({ db, userId, platformConnections, addToast, addNotification, onUnsavedContentChange, saveDraftRef, initialData, onClearInitialData }) => {
-    // Post content state
-    const [content, setContent] = useState('');
+    // Post content state - PER PLATFORM
+    const [platformDrafts, setPlatformDrafts] = useState({});     // { linkedin: "...", twitter: "..." }
+    const [platformTones, setPlatformTones] = useState({});        // { linkedin: "professional", ... }
+    const [activePlatform, setActivePlatform] = useState(null);    // currently viewed tab
+    const [toneDropdownOpen, setToneDropdownOpen] = useState(false);
+    const [showPlatformDropdown, setShowPlatformDropdown] = useState(false); // For adding platforms
+    const [isRefining, setIsRefining] = useState(false);
     const [selectedPlatforms, setSelectedPlatforms] = useState([]);
 
-    // Image state - MUST be declared before useEffect that uses them
+    // Platform tone defaults & tone options
+    const PLATFORM_DEFAULT_TONES = {
+        linkedin: 'professional', twitter: 'casual',
+        facebook: 'enthusiastic', instagram: 'casual',
+    };
+    const TONE_OPTIONS = [
+        { value: 'professional', label: '💼 Professional' },
+        { value: 'casual', label: '😊 Casual' },
+        { value: 'humorous', label: '😄 Humorous' },
+        { value: 'enthusiastic', label: '🔥 Enthusiastic' },
+        { value: 'informative', label: '📚 Informative' },
+        { value: 'neutral', label: '⚖️ Neutral' },
+    ];
+
+    // Helper: get current active platform's content
+    const content = activePlatform ? (platformDrafts[activePlatform] || '') : '';
+    const setContent = (val) => {
+        if (activePlatform) {
+            setPlatformDrafts(prev => ({ ...prev, [activePlatform]: val }));
+        }
+    };
+    // Helper: check if any platform has content
+    const anyPlatformHasContent = () => Object.values(platformDrafts).some(c => c && c.trim().length > 0);
+
+    // Image state
     const [uploadedImage, setUploadedImage] = useState(null);
     const [imageBase64, setImageBase64] = useState(null);
     const [imageMimeType, setImageMimeType] = useState(null);
@@ -3873,66 +3932,61 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
     const imageLoadedRef = useRef(false);
     const lastImageUrlRef = useRef(null);
 
-    // Load initial data if provided (e.g. from Trending Topics)
+    // Load initial data if provided (e.g. from Trending Topics or Drafts)
     useEffect(() => {
         if (initialData) {
             console.log("Loading initial data into composer:", initialData);
 
-            // 1. Load Text Content
-            if (initialData.content) setContent(initialData.content);
+            // Load per-platform drafts if available, else fallback to single content
+            if (initialData.platformDrafts) {
+                setPlatformDrafts(initialData.platformDrafts);
+                if (initialData.platformTones) setPlatformTones(initialData.platformTones);
+            } else if (initialData.content) {
+                // Legacy single-content draft: load into all selected platforms
+                const platforms = initialData.platforms || [];
+                if (platforms.length > 0) {
+                    const drafts = {};
+                    platforms.forEach(p => { drafts[p] = initialData.content; });
+                    setPlatformDrafts(drafts);
+                }
+            }
 
-            // 2. Load Platforms
-            if (initialData.platforms) setSelectedPlatforms(initialData.platforms);
+            if (initialData.platforms) {
+                setSelectedPlatforms(initialData.platforms);
+                setActivePlatform(initialData.platforms[0] || null);
+                // Initialize tones
+                const tones = {};
+                initialData.platforms.forEach(p => {
+                    tones[p] = (initialData.platformTones && initialData.platformTones[p]) || PLATFORM_DEFAULT_TONES[p] || 'neutral';
+                });
+                setPlatformTones(prev => ({ ...prev, ...tones }));
+            }
 
-            // 3. Load AI Image - with guard to prevent duplicate loads
+            // Load AI Image
             if (initialData.imageUrl && initialData.imageUrl !== lastImageUrlRef.current) {
-                // Mark this URL as being loaded
                 lastImageUrlRef.current = initialData.imageUrl;
-
-                console.log("Fetching AI Image via proxy (first time for this URL)");
-
                 const proxyUrl = `http://localhost:8006/proxy-image?url=${encodeURIComponent(initialData.imageUrl)}`;
-
                 fetch(proxyUrl)
-                    .then(res => {
-                        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-                        return res.blob();
-                    })
+                    .then(res => { if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`); return res.blob(); })
                     .then(blob => {
-                        console.log("Image Fetch Success. Blob size:", blob.size);
                         if (blob.size < 100) throw new Error("Image blob too small");
-
-                        // Create object URL for display (this is what img src needs)
                         const objectUrl = URL.createObjectURL(blob);
                         setUploadedImage(objectUrl);
                         setImageMimeType("image/jpeg");
-
-                        // Create preview
                         const reader = new FileReader();
-                        reader.onloadend = () => {
-                            setImageBase64(reader.result);
-                            imageLoadedRef.current = true;
-                            addToast("AI Image loaded successfully", "success");
-                        };
-                        reader.onerror = () => {
-                            console.error("FileReader failed");
-                        };
+                        reader.onloadend = () => { setImageBase64(reader.result); imageLoadedRef.current = true; addToast("AI Image loaded", "success"); };
                         reader.readAsDataURL(blob);
                     })
-                    .catch(err => {
-                        console.error("Failed to load AI image:", err);
-                        addToast(`Failed to load image: ${err.message}`, "error");
-                    });
+                    .catch(err => { addToast(`Failed to load image: ${err.message}`, "error"); });
             }
 
-            // Clear the pending draft so it doesn't re-load on every render
             if (onClearInitialData) setTimeout(onClearInitialData, 50);
         }
-    }, [initialData]); // Removed addToast and onClearInitialData from deps to prevent re-runs
+    }, [initialData]);
 
     // AI Chat state
     const [chatMessages, setChatMessages] = useState([
-        { role: 'assistant', content: '👋 Hi! I\'m your AI writing assistant. Tell me what kind of post you\'d like to create, or paste your draft and I\'ll help you refine it!' }
+        { role: 'assistant', content: '\ud83d\udc4b Hi! I\'m your AI writing assistant. Tell me what kind of post you\'d like to create, or paste your draft and I\'ll help you refine it!' }
     ]);
     const [chatInput, setChatInput] = useState('');
     const [isAiTyping, setIsAiTyping] = useState(false);
@@ -3945,19 +3999,17 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
     // Loading/status state
     const [loading, setLoading] = useState(false);
     const [statusMessage, setStatusMessage] = useState(null);
-    const [regenCooldown, setRegenCooldown] = useState(0); // Cooldown for regenerate button
+    const [regenCooldown, setRegenCooldown] = useState(0);
 
     // Auto-dismiss status messages after 3 seconds
     useEffect(() => {
         if (statusMessage) {
-            const timer = setTimeout(() => {
-                setStatusMessage(null);
-            }, 3000);
+            const timer = setTimeout(() => setStatusMessage(null), 3000);
             return () => clearTimeout(timer);
         }
     }, [statusMessage]);
 
-    // Cooldown countdown timer for regenerate button
+    // Cooldown countdown timer
     useEffect(() => {
         if (regenCooldown > 0) {
             const timer = setTimeout(() => setRegenCooldown(regenCooldown - 1), 1000);
@@ -3969,6 +4021,7 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
     const [drafts, setDrafts] = useState([]);
     const [showSaveDraftPopup, setShowSaveDraftPopup] = useState(false);
     const [pendingNavigation, setPendingNavigation] = useState(null);
+    const [draftFilter, setDraftFilter] = useState(null); // Platform filter for drafts view
 
     // View state: 'composer' or 'drafts'
     const [composerView, setComposerView] = useState('composer');
@@ -4005,15 +4058,27 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
         return () => unsubscribe();
     }, [db, userId]);
 
+    // Auto-select first connected platform if none selected
+    useEffect(() => {
+        if (!activePlatform && selectedPlatforms.length === 0 && platformConnections) {
+            const connected = Object.keys(platformConnections).filter(k => platformConnections[k]);
+            if (connected.length > 0) {
+                const first = connected[0];
+                setSelectedPlatforms([first]);
+                setActivePlatform(first);
+            }
+        }
+    }, [platformConnections]);
+
     // Check for unsaved content
     const hasUnsavedContent = () => {
-        return content.trim().length > 0 || selectedPlatforms.length > 0 || uploadedImage;
+        return anyPlatformHasContent() || uploadedImage;
     };
 
     // Report unsaved content state to parent
     useEffect(() => {
         onUnsavedContentChange?.(hasUnsavedContent());
-    }, [content, selectedPlatforms, uploadedImage, onUnsavedContentChange]);
+    }, [platformDrafts, selectedPlatforms, uploadedImage, onUnsavedContentChange]);
 
     // Auto-scroll chat to bottom
     useEffect(() => {
@@ -4021,9 +4086,31 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
     }, [chatMessages]);
 
     const togglePlatform = (id) => {
-        setSelectedPlatforms(prev =>
-            prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]
-        );
+        setSelectedPlatforms(prev => {
+            const isCurrentlySelected = prev.includes(id);
+            const newSelected = isCurrentlySelected ? prev.filter(p => p !== id) : [...prev, id];
+
+            if (!isCurrentlySelected) {
+                // Just checked a new platform
+                setActivePlatform(id);
+                // Initialize default tone if not set
+                setPlatformTones(prevTones => ({
+                    ...prevTones,
+                    [id]: prevTones[id] || PLATFORM_DEFAULT_TONES[id] || 'neutral'
+                }));
+                // If content already exists for other platforms, prompt to generate?
+                if (anyPlatformHasContent() && !platformDrafts[id]) {
+                    // We'll let the user know they can generate for this platform
+                    setStatusMessage({ type: 'info', text: `✨ Use AI Chat to generate ${id.charAt(0).toUpperCase() + id.slice(1)} content!` });
+                }
+            } else {
+                // Unchecked a platform - switch active to another selected one
+                if (activePlatform === id) {
+                    setActivePlatform(newSelected.length > 0 ? newSelected[0] : null);
+                }
+            }
+            return newSelected;
+        });
     };
 
     const handleFileChange = (event) => {
@@ -4108,10 +4195,15 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
     };
 
     const handleSendChat = async () => {
-        if (!chatInput.trim()) return;
+        if (!chatInput.trim() && !currentContent) return;
 
-        const userMessage = { role: 'user', content: chatInput };
-        setChatMessages(prev => [...prev, userMessage]);
+        // Default to all connected platforms if none selected
+        const connectedPlatformIds = Object.keys(platformConnections).filter(k => platformConnections[k]);
+        const targetPlatforms = selectedPlatforms.length > 0 ? selectedPlatforms : connectedPlatformIds;
+
+        const newUserMsg = { role: 'user', content: chatInput };
+        const newMessages = [...chatMessages, newUserMsg];
+        setChatMessages(newMessages);
         setChatInput('');
         setIsAiTyping(true);
 
@@ -4119,19 +4211,19 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
             // Import the chatWithAI function dynamically
             const { chatWithAI } = await import('./api/social');
 
-            // Get connected platforms from platformConnections prop
-            const connectedPlatforms = Object.entries(platformConnections || {})
-                .filter(([_, isConnected]) => isConnected)
-                .map(([platform]) => platform);
-
             const response = await chatWithAI(
                 chatInput,
                 content,
                 chatMessages,
                 selectedPlatforms,
-                connectedPlatforms,
+                connectedPlatformIds,
                 imageBase64,
-                imageMimeType
+                imageMimeType,
+                {
+                    selected_platforms: targetPlatforms,
+                    connected_platforms: connectedPlatformIds,
+                    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                }
             );
 
             if (response.success) {
@@ -4147,29 +4239,54 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
                 // Handle actions (post/schedule)
                 if (response.action === 'posted') {
                     addToast('✅ Posted successfully!', 'success');
-                    // Clear the composer after posting
-                    setContent('');
+                    setPlatformDrafts({});
                     setSelectedPlatforms([]);
+                    setActivePlatform(null);
                     if (uploadedImage) URL.revokeObjectURL(uploadedImage);
                     setUploadedImage(null);
                     setImageBase64(null);
                     setImageMimeType(null);
                 } else if (response.action === 'scheduled') {
-                    // Use statusMessage for consistent popup notification
                     setStatusMessage({
                         type: 'success',
                         text: `📅 Scheduled successfully for ${response.action_result?.scheduled_time || 'later'}! Check your calendar.`
                     });
-                    // Optionally clear composer after scheduling
-                    setContent('');
+                    setPlatformDrafts({});
                     setSelectedPlatforms([]);
+                    setActivePlatform(null);
                     if (uploadedImage) URL.revokeObjectURL(uploadedImage);
                     setUploadedImage(null);
                     setImageBase64(null);
                     setImageMimeType(null);
+                } else if (response.suggested_platforms) {
+                    // Per-platform content received
+                    setPlatformDrafts(prev => ({
+                        ...prev,
+                        ...response.suggested_platforms
+                    }));
+                    // Initialize tones for any new platforms
+                    const newTones = {};
+                    Object.keys(response.suggested_platforms).forEach(p => {
+                        if (!platformTones[p]) {
+                            newTones[p] = PLATFORM_DEFAULT_TONES[p] || 'neutral';
+                        }
+                    });
+                    if (Object.keys(newTones).length > 0) {
+                        setPlatformTones(prev => ({ ...prev, ...newTones }));
+                    }
+                    // Set active platform if none is active
+                    if (!activePlatform && Object.keys(response.suggested_platforms).length > 0) {
+                        setActivePlatform(Object.keys(response.suggested_platforms)[0]);
+                    }
+                    setStatusMessage({ type: 'success', text: '✨ Content generated for each platform!' });
                 } else if (response.suggested_content) {
-                    // Auto-apply suggested content if provided (content generation)
-                    setContent(response.suggested_content);
+                    // Single content (legacy / single platform) - apply to active platform or all selected
+                    if (selectedPlatforms.length === 1) {
+                        setPlatformDrafts(prev => ({ ...prev, [selectedPlatforms[0]]: response.suggested_content }));
+                        if (!activePlatform) setActivePlatform(selectedPlatforms[0]);
+                    } else if (activePlatform) {
+                        setPlatformDrafts(prev => ({ ...prev, [activePlatform]: response.suggested_content }));
+                    }
                 }
             } else {
                 setChatMessages(prev => [...prev, {
@@ -4190,7 +4307,7 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
 
     // --- DRAFTS FUNCTIONS ---
     const saveDraft = async () => {
-        if (!content.trim() && !uploadedImage) {
+        if (!anyPlatformHasContent() && !uploadedImage) {
             addToast('Nothing to save as draft.', 'error');
             return;
         }
@@ -4199,11 +4316,15 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
             const path = `users/${userId}/drafts`;
             const docRef = doc(collection(db, path));
 
+            // Generate title from first platform's content (first 50 chars)
+            const firstContent = Object.values(platformDrafts).find(c => c && c.trim());
+            const title = firstContent ? firstContent.trim().substring(0, 50) + (firstContent.length > 50 ? '...' : '') : 'Untitled Draft';
+
             await setDoc(docRef, {
-                content: content.trim(),
+                title,
+                platformDrafts: platformDrafts,
+                platformTones: platformTones,
                 platforms: selectedPlatforms,
-                // imageBase64 from FileReader already has the full data URL (data:image/...;base64,...)
-                // Use it directly if it starts with 'data:', otherwise construct it
                 image: imageBase64
                     ? (imageBase64.startsWith('data:') ? imageBase64 : `data:${imageMimeType || 'image/jpeg'};base64,${imageBase64}`)
                     : null,
@@ -4226,80 +4347,10 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
         }
     }, [saveDraftRef, saveDraft]);
 
-    const loadDraft = (draft) => {
-        setContent(draft.content || '');
-        setSelectedPlatforms(draft.platforms || []);
 
-        if (draft.image) {
-            setUploadedImage(draft.image);
-            // Extract base64 and mime type from data URL
-            const match = draft.image.match(/^data:(.+);base64,(.+)$/);
-            if (match) {
-                setImageMimeType(match[1]);
-                setImageBase64(match[2]);
-            }
-        } else {
-            setUploadedImage(null);
-            setImageBase64(null);
-            setImageMimeType(null);
-        }
-
-        setComposerView('composer');
-        addToast('📄 Draft loaded', 'info');
-    };
-
-    const deleteDraft = async (draftId) => {
-        try {
-            await deleteDoc(doc(db, `users/${userId}/drafts`, draftId));
-            addToast('🗑️ Draft deleted', 'success');
-        } catch (error) {
-            console.error('❌ [COMPOSER] Failed to delete draft:', error);
-            addToast(`Failed to delete draft: ${error.message}`, 'error');
-        }
-    };
-
-    const clearComposer = () => {
-        setContent('');
-        setSelectedPlatforms([]);
-        setUploadedImage(null);
-        setImageBase64(null);
-        setImageMimeType(null);
-        setShowSaveDraftPopup(false);
-        setPendingNavigation(null);
-    };
-
-    const handleSaveDraftAndLeave = async () => {
-        await saveDraft();
-        clearComposer();
-        if (pendingNavigation) {
-            pendingNavigation();
-        }
-    };
-
-    const handleDiscardAndLeave = () => {
-        clearComposer();
-        if (pendingNavigation) {
-            pendingNavigation();
-        }
-    };
-
-    // Handle navigation with unsaved content check
-    const handleNavigateToDrafts = () => {
-        if (composerView === 'drafts') {
-            // Already in drafts, just go back to composer
-            setComposerView('composer');
-        } else if (hasUnsavedContent()) {
-            // Show save draft popup if there's unsaved content
-            setPendingNavigation(() => () => setComposerView('drafts'));
-            setShowSaveDraftPopup(true);
-        } else {
-            // No unsaved content, navigate directly
-            setComposerView('drafts');
-        }
-    };
 
     const handlePostNow = async () => {
-        if (!content.trim() || selectedPlatforms.length === 0) {
+        if (!anyPlatformHasContent() || selectedPlatforms.length === 0) {
             setStatusMessage({ type: 'error', text: 'Add content and select at least one platform.' });
             return;
         }
@@ -4315,10 +4366,15 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
             let platformPostIds = {};
 
             for (const platformId of selectedPlatforms) {
+                const platformContent = platformDrafts[platformId] || '';
+                if (!platformContent.trim()) {
+                    console.warn(`⚠️ [COMPOSER] Skipping ${platformId} - no content`);
+                    continue;
+                }
+
                 if (platformId === 'linkedin') {
-                    const result = await postToLinkedIn(content, imageBase64, imageMimeType);
+                    const result = await postToLinkedIn(platformContent, imageBase64, imageMimeType);
                     console.log('✅ [COMPOSER] LinkedIn post result:', result);
-                    // Capture post_id from response - check multiple possible locations (same as ComposerModal)
                     const linkedInPostId =
                         result?.result?.post_id ||
                         result?.result?.id ||
@@ -4330,8 +4386,6 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
                     if (linkedInPostId) {
                         platformPostIds.linkedin = linkedInPostId;
                         console.log(`📌 [COMPOSER] LinkedIn post_id captured: ${linkedInPostId}`);
-                    } else {
-                        console.warn('⚠️ [COMPOSER] No post_id found in LinkedIn response');
                     }
                 }
                 // Add other platforms as needed
@@ -4343,10 +4397,11 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
                 const docRef = doc(collection(db, path));
 
                 await setDoc(docRef, {
-                    content: content.trim(),
+                    content: Object.values(platformDrafts).find(c => c && c.trim()) || '',
+                    platformDrafts: platformDrafts,
                     platforms: selectedPlatforms,
                     image: imageBase64 ? `data:${imageMimeType};base64,${imageBase64}` : null,
-                    scheduledTime: new Date(), // Posted now
+                    scheduledTime: new Date(),
                     status: 'posted',
                     platformPostIds: platformPostIds,
                     createdAt: serverTimestamp(),
@@ -4357,13 +4412,14 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
 
             setStatusMessage({ type: 'success', text: '✅ Posted successfully! Check your calendar.' });
 
-            // Reset form after 2 seconds so user can see success message
+            // Reset form after 2 seconds
             setTimeout(() => {
-                setContent('');
+                setPlatformDrafts({});
                 setUploadedImage(null);
                 setImageBase64(null);
                 setImageMimeType(null);
                 setSelectedPlatforms([]);
+                setActivePlatform(null);
                 console.log('✅ [COMPOSER] Form reset complete');
             }, 2000);
 
@@ -4379,7 +4435,7 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
     };
 
     const handleSchedule = async () => {
-        if (!content.trim() || selectedPlatforms.length === 0 || !scheduleDate || !scheduleTime) {
+        if (!anyPlatformHasContent() || selectedPlatforms.length === 0 || !scheduleDate || !scheduleTime) {
             setStatusMessage({ type: 'error', text: 'Fill in all fields including date/time.' });
             return;
         }
@@ -4396,7 +4452,8 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
             const docRef = doc(collection(db, path));
 
             await setDoc(docRef, {
-                content: content.trim(),
+                content: Object.values(platformDrafts).find(c => c && c.trim()) || '',
+                platformDrafts: platformDrafts,
                 platforms: selectedPlatforms,
                 image: imageBase64
                     ? (imageBase64.startsWith('data:') ? imageBase64 : `data:${imageMimeType || 'image/jpeg'};base64,${imageBase64}`)
@@ -4410,16 +4467,148 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
             addNotification?.({ type: 'scheduled', message: `Post scheduled for ${scheduledTime.toLocaleString()}` });
 
             // Reset
-            setContent('');
+            setPlatformDrafts({});
             setUploadedImage(null);
             setImageBase64(null);
             setSelectedPlatforms([]);
+            setActivePlatform(null);
             setShowScheduler(false);
         } catch (error) {
             setStatusMessage({ type: 'error', text: `Failed to schedule: ${error.message}` });
         } finally {
             setLoading(false);
         }
+    };
+
+    // --- REFINE TONE FUNCTION ---
+    const handleRefineTone = async () => {
+        if (!activePlatform || !platformDrafts[activePlatform]?.trim()) {
+            setStatusMessage({ type: 'error', text: 'No content to refine.' });
+            return;
+        }
+
+        setIsRefining(true);
+        try {
+            const { refineTone } = await import('./api/social');
+            const currentTone = platformTones[activePlatform] || PLATFORM_DEFAULT_TONES[activePlatform] || 'neutral';
+            const result = await refineTone(platformDrafts[activePlatform], activePlatform, currentTone);
+
+            if (result.success && result.refined_content) {
+                setPlatformDrafts(prev => ({ ...prev, [activePlatform]: result.refined_content }));
+                setStatusMessage({ type: 'success', text: `✨ ${activePlatform.charAt(0).toUpperCase() + activePlatform.slice(1)} content refined with ${currentTone} tone!` });
+            } else {
+                setStatusMessage({ type: 'error', text: result.error || 'Refinement failed.' });
+            }
+        } catch (error) {
+            console.error('Refine tone error:', error);
+            setStatusMessage({ type: 'error', text: `Refine failed: ${error.message}` });
+        } finally {
+            setIsRefining(false);
+        }
+    };
+
+    // --- DRAFT NAVIGATION & LOADING ---
+    const handleNavigateToDrafts = () => {
+        if (hasUnsavedContent()) {
+            setPendingNavigation('drafts');
+            setShowSaveDraftPopup(true);
+        } else {
+            setComposerView('drafts');
+            setDraftFilter(null);
+        }
+    };
+
+    const handleSaveDraftAndLeave = async () => {
+        await saveDraft();
+        setShowSaveDraftPopup(false);
+        if (pendingNavigation === 'drafts') {
+            setComposerView('drafts');
+            setDraftFilter(null);
+        }
+        setPendingNavigation(null);
+    };
+
+    const handleDiscardAndLeave = () => {
+        setShowSaveDraftPopup(false);
+        // Clear content
+        setPlatformDrafts({});
+        setPlatformTones({});
+        setSelectedPlatforms([]);
+        setActivePlatform(null);
+        setUploadedImage(null);
+        setImageBase64(null);
+        setImageMimeType(null);
+
+        if (pendingNavigation === 'drafts') {
+            setComposerView('drafts');
+            setDraftFilter(null);
+        }
+        setPendingNavigation(null);
+    };
+
+    const deleteDraft = async (draftId) => {
+        if (!confirm('Are you sure you want to delete this draft?')) return;
+        try {
+            await deleteDoc(doc(db, `users/${userId}/drafts`, draftId));
+            addToast('Draft deleted', 'success');
+        } catch (error) {
+            console.error('Error deleting draft:', error);
+            addToast('Failed to delete draft', 'error');
+        }
+    };
+
+    const loadDraft = (draft) => {
+        // 1. Load platforms
+        if (draft.platforms && draft.platforms.length > 0) {
+            setSelectedPlatforms(draft.platforms);
+            setActivePlatform(draft.platforms[0]);
+        } else {
+            setSelectedPlatforms([]);
+            setActivePlatform(null);
+        }
+
+        // 2. Load Content
+        if (draft.platformDrafts) {
+            setPlatformDrafts(draft.platformDrafts);
+            // Load tones if available
+            if (draft.platformTones) {
+                setPlatformTones(prev => ({ ...prev, ...draft.platformTones }));
+            }
+        } else if (draft.content) {
+            // Backward compatibility: load single content into all platforms
+            const newDrafts = {};
+            (draft.platforms || []).forEach(p => newDrafts[p] = draft.content);
+            setPlatformDrafts(newDrafts);
+        }
+
+        // 3. Initialize tones for platforms that don't have them
+        if (draft.platforms) {
+            const newTones = {};
+            draft.platforms.forEach(p => {
+                if (!draft.platformTones?.[p] && !platformTones[p]) {
+                    newTones[p] = PLATFORM_DEFAULT_TONES[p] || 'neutral';
+                }
+            });
+            setPlatformTones(prev => ({ ...prev, ...newTones }));
+        }
+
+        // 4. Load Image
+        if (draft.image) {
+            setUploadedImage(draft.image);
+            if (draft.image.startsWith('data:')) {
+                const base64 = draft.image.split(',')[1];
+                setImageBase64(base64);
+                const matches = draft.image.match(/^data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+);base64,/);
+                if (matches && matches.length > 1) setImageMimeType(matches[1]);
+            }
+        } else {
+            setUploadedImage(null);
+            setImageBase64(null);
+            setImageMimeType(null);
+        }
+
+        setComposerView('composer');
+        setStatusMessage({ type: 'success', text: 'Draft loaded!' });
     };
 
     return (
@@ -4501,16 +4690,50 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
                 {composerView === 'drafts' && (
                     <div className="flex-1 overflow-y-auto p-6">
                         {/* Back to Composer Header */}
-                        <div className="flex items-center gap-3 mb-6">
+                        <div className="flex items-center justify-between mb-6">
+                            <div className="flex items-center gap-3">
+                                <button
+                                    onClick={() => setComposerView('composer')}
+                                    className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                                    title="Back to Composer"
+                                >
+                                    <ArrowLeft size={20} className="text-gray-600 dark:text-gray-300" />
+                                </button>
+                                <div>
+                                    <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100">Your Drafts</h2>
+                                    <p className="text-xs text-gray-500 dark:text-gray-400">{drafts.length} saved drafts</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Platform Filter */}
+                        <div className="flex gap-2 mb-6 overflow-x-auto pb-2 scrollbar-hide">
                             <button
-                                onClick={() => setComposerView('composer')}
-                                className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                                title="Back to Composer"
+                                onClick={() => setDraftFilter(null)}
+                                className={`px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors ${!draftFilter
+                                    ? 'bg-gray-800 text-white dark:bg-white dark:text-gray-900'
+                                    : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600'
+                                    }`}
                             >
-                                <ArrowLeft size={20} className="text-gray-600 dark:text-gray-300" />
+                                All Drafts
                             </button>
-                            <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100">Your Drafts</h2>
-                            <span className="text-sm text-gray-500 dark:text-gray-400">({drafts.length})</span>
+                            {PLATFORMS.filter(p => ['linkedin', 'twitter', 'facebook', 'instagram'].includes(p.id)).map(p => {
+                                const Icon = p.icon;
+                                const isActive = draftFilter === p.id;
+                                return (
+                                    <button
+                                        key={p.id}
+                                        onClick={() => setDraftFilter(p.id)}
+                                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium whitespace-nowrap transition-colors border ${isActive
+                                            ? `${p.color} text-white border-transparent`
+                                            : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-700 hover:border-gray-300 dark:hover:border-gray-600'
+                                            }`}
+                                    >
+                                        <Icon size={14} />
+                                        {p.name}
+                                    </button>
+                                );
+                            })}
                         </div>
 
                         {drafts.length === 0 ? (
@@ -4526,52 +4749,73 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
                                 </button>
                             </div>
                         ) : (
-                            <div className="grid gap-4 max-w-2xl mx-auto">
-                                {drafts.map(draft => (
-                                    <div
-                                        key={draft.id}
-                                        className="bg-gray-50 dark:bg-gray-700/50 rounded-xl p-4 border border-gray-200 dark:border-gray-600 hover:border-purple-400 transition-colors"
-                                    >
-                                        <p className="text-gray-800 dark:text-gray-100 mb-3 line-clamp-3">
-                                            {draft.content || <span className="italic text-gray-400">No content</span>}
-                                        </p>
+                            <div className="grid gap-4 max-w-2xl mx-auto pb-8">
+                                {drafts.filter(d => !draftFilter || (d.platforms && d.platforms.includes(draftFilter))).map(draft => {
+                                    // Determine preview content
+                                    const previewContent = draft.platformDrafts
+                                        ? (Object.values(draft.platformDrafts).find(c => c && c.trim()) || '')
+                                        : (draft.content || '');
 
-                                        {draft.image && (
-                                            <div className="mb-3 rounded-lg overflow-hidden">
-                                                <img src={draft.image} alt="Draft" className="w-full h-32 object-cover" />
+                                    return (
+                                        <div
+                                            key={draft.id}
+                                            className="bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-200 dark:border-gray-700 hover:border-purple-400 dark:hover:border-purple-500 transition-all shadow-sm hover:shadow-md group"
+                                        >
+                                            <div className="flex justify-between items-start mb-3">
+                                                <h3 className="font-semibold text-gray-900 dark:text-gray-100 line-clamp-1 flex-1 mr-4">
+                                                    {draft.title || 'Untitled Draft'}
+                                                </h3>
+                                                <span className="text-xs text-gray-500 whitespace-nowrap flex items-center gap-1">
+                                                    <Clock size={12} />
+                                                    {draft.updatedAt?.seconds
+                                                        ? new Date(draft.updatedAt.seconds * 1000).toLocaleDateString()
+                                                        : 'Just now'}
+                                                </span>
                                             </div>
-                                        )}
 
-                                        <div className="flex items-center justify-between mb-3">
-                                            <div className="flex items-center gap-2">
-                                                {draft.platforms?.map(p => {
-                                                    const Icon = p === 'linkedin' ? Linkedin : p === 'twitter' ? Twitter : p === 'facebook' ? Facebook : p === 'instagram' ? Instagram : null;
-                                                    return Icon ? <Icon key={p} size={16} className="text-gray-400" /> : null;
-                                                })}
+                                            <div className="flex items-start gap-4 mb-4">
+                                                {draft.image && (
+                                                    <div className="w-20 h-20 rounded-lg overflow-hidden flex-shrink-0 bg-gray-100 dark:bg-gray-700 border border-gray-200 dark:border-gray-600">
+                                                        <img src={draft.image} alt="Draft" className="w-full h-full object-cover" />
+                                                    </div>
+                                                )}
+                                                <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-3 leading-relaxed flex-1">
+                                                    {previewContent || <span className="italic text-gray-400">No content preview available</span>}
+                                                </p>
                                             </div>
-                                            <span className="text-xs text-gray-500">
-                                                {draft.updatedAt?.seconds
-                                                    ? new Date(draft.updatedAt.seconds * 1000).toLocaleDateString()
-                                                    : 'Just now'}
-                                            </span>
-                                        </div>
 
-                                        <div className="flex gap-2">
-                                            <button
-                                                onClick={() => loadDraft(draft)}
-                                                className="flex-1 px-4 py-2 bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300 rounded-lg font-medium hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-colors"
-                                            >
-                                                Load Draft
-                                            </button>
-                                            <button
-                                                onClick={(e) => { e.stopPropagation(); deleteDraft(draft.id); }}
-                                                className="px-4 py-2 bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
-                                            >
-                                                <Trash2 size={18} />
-                                            </button>
+                                            <div className="flex items-center justify-between pt-3 border-t border-gray-100 dark:border-gray-700">
+                                                <div className="flex items-center gap-2">
+                                                    {draft.platforms?.map(p => {
+                                                        const platform = PLATFORMS.find(pl => pl.id === p);
+                                                        const Icon = platform?.icon;
+                                                        return Icon ? (
+                                                            <div key={p} className="p-1.5 bg-gray-50 dark:bg-gray-700 rounded-md text-gray-500 dark:text-gray-400" title={platform.name}>
+                                                                <Icon size={14} />
+                                                            </div>
+                                                        ) : null;
+                                                    })}
+                                                </div>
+
+                                                <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                    <button
+                                                        onClick={() => loadDraft(draft)}
+                                                        className="px-4 py-1.5 bg-purple-50 text-purple-600 dark:bg-purple-900/30 dark:text-purple-300 rounded-lg text-sm font-medium hover:bg-purple-100 dark:hover:bg-purple-900/50 transition-colors"
+                                                    >
+                                                        Open
+                                                    </button>
+                                                    <button
+                                                        onClick={(e) => { e.stopPropagation(); deleteDraft(draft.id); }}
+                                                        className="p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                                        title="Delete draft"
+                                                    >
+                                                        <Trash2 size={16} />
+                                                    </button>
+                                                </div>
+                                            </div>
                                         </div>
-                                    </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         )}
                     </div>
@@ -4604,156 +4848,262 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
                                     </button>
                                 </div>
 
-                                {/* Platform Selector */}
-                                <div className="mb-4">
-                                    <label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 block">Select Platforms</label>
-                                    <div className="flex flex-wrap gap-2">
-                                        {PLATFORMS.filter(p => ['linkedin', 'twitter', 'facebook', 'instagram'].includes(p.id)).map(platform => {
-                                            const Icon = platform.icon;
-                                            const isSelected = selectedPlatforms.includes(platform.id);
-                                            const isConnected = platformConnections?.[platform.id];
 
-                                            return (
-                                                <button
-                                                    key={platform.id}
-                                                    onClick={() => isConnected && togglePlatform(platform.id)}
-                                                    disabled={!isConnected}
-                                                    title={!isConnected ? `${platform.name} not connected` : `Post to ${platform.name}`}
-                                                    className={`flex items-center gap-2 px-3 py-2 rounded-lg border transition-all ${isSelected
-                                                        ? `${platform.color} text-white border-transparent`
-                                                        : isConnected
-                                                            ? 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:border-blue-400'
-                                                            : 'bg-gray-50 dark:bg-gray-800 text-gray-400 border-gray-200 dark:border-gray-700 cursor-not-allowed opacity-50'
-                                                        }`}
-                                                >
-                                                    <Icon size={18} />
-                                                    <span className="text-sm font-medium">{platform.name}</span>
-                                                </button>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-
-                                {/* Post Preview Card */}
-                                <div className="bg-gray-50 dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-700 p-4">
-                                    {/* Mock LinkedIn Header */}
-                                    <div className="flex items-center gap-3 mb-3">
-                                        <div className="w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold">
-                                            You
+                                {/* Unified Composer Card */}
+                                <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm flex flex-col">
+                                    {/* Tabs Header */}
+                                    <div className="flex items-center justify-between px-2 pt-2 border-b border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/20 rounded-t-xl">
+                                        <div className="flex items-center gap-1 overflow-x-auto scrollbar-hide flex-1">
+                                            {selectedPlatforms.map(pId => {
+                                                const platform = PLATFORMS.find(p => p.id === pId);
+                                                const isActive = activePlatform === pId;
+                                                return (
+                                                    <button
+                                                        key={pId}
+                                                        onClick={() => setActivePlatform(pId)}
+                                                        className={`relative flex items-center gap-2 px-4 py-3 border-b-2 font-medium transition-all rounded-t-lg -mb-[1px] whitespace-nowrap ${isActive
+                                                            ? `border-${platform.color.split('-')[1] || 'blue'}-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white`
+                                                            : 'border-transparent hover:bg-white/50 dark:hover:bg-gray-800/50 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                                                            }`}
+                                                    >
+                                                        <platform.icon size={16} className={isActive ? platform.color.replace('bg-', 'text-') : ''} />
+                                                        {platform.name}
+                                                        {isActive && <span className={`absolute bottom-[-2px] left-0 right-0 h-[2px] ${platform.color}`}></span>}
+                                                    </button>
+                                                );
+                                            })}
                                         </div>
-                                        <div>
-                                            <p className="font-semibold text-gray-900 dark:text-gray-100 text-sm">Your Name</p>
-                                            <p className="text-xs text-gray-500">Just now • 🌐</p>
+
+                                        {/* Add Platform Button */}
+                                        <div className="relative ml-2 mb-0.5 flex-shrink-0">
+                                            <button
+                                                onClick={() => setShowPlatformDropdown(!showPlatformDropdown)}
+                                                className="flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 p-2 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors uppercase tracking-wide"
+                                            >
+                                                <Plus size={16} />
+                                                Add
+                                            </button>
+                                            {showPlatformDropdown && (
+                                                <>
+                                                    <div className="fixed inset-0 z-10" onClick={() => setShowPlatformDropdown(false)}></div>
+                                                    <div className="absolute top-full right-0 mt-1 w-56 bg-white dark:bg-gray-800 rounded-lg shadow-xl border border-gray-200 dark:border-gray-700 z-20 p-1.5">
+                                                        {PLATFORMS.filter(p => ['linkedin', 'twitter', 'facebook', 'instagram'].includes(p.id) && !selectedPlatforms.includes(p.id)).length === 0 ? (
+                                                            <div className="px-3 py-2 text-xs text-center text-gray-500 dark:text-gray-400">All platforms added</div>
+                                                        ) : (
+                                                            PLATFORMS.filter(p => ['linkedin', 'twitter', 'facebook', 'instagram'].includes(p.id) && !selectedPlatforms.includes(p.id)).map(p => {
+                                                                const isConnected = platformConnections?.[p.id];
+                                                                return (
+                                                                    <button
+                                                                        key={p.id}
+                                                                        onClick={() => {
+                                                                            if (isConnected) {
+                                                                                togglePlatform(p.id);
+                                                                            } else {
+                                                                                handleNavClick('integrations_page');
+                                                                            }
+                                                                            setShowPlatformDropdown(false);
+                                                                        }}
+                                                                        className="flex items-center justify-between w-full px-3 py-2 text-sm rounded-md transition-colors hover:bg-gray-50 dark:hover:bg-gray-700 group"
+                                                                    >
+                                                                        <span className={`flex items-center gap-2 ${isConnected ? 'text-gray-700 dark:text-gray-200' : 'text-gray-400 dark:text-gray-500'}`}>
+                                                                            <p.icon size={14} className={isConnected ? p.color.replace('bg-', 'text-') : 'text-gray-400'} />
+                                                                            {p.name}
+                                                                        </span>
+                                                                        {isConnected ? (
+                                                                            <Plus size={14} className="text-gray-400 group-hover:text-gray-600 dark:text-gray-500 dark:group-hover:text-gray-300" />
+                                                                        ) : (
+                                                                            <span className="text-xs font-semibold text-blue-500 hover:text-blue-600 flex items-center gap-1">
+                                                                                Connect
+                                                                            </span>
+                                                                        )}
+                                                                    </button>
+                                                                );
+                                                            })
+                                                        )}
+                                                    </div>
+                                                </>
+                                            )}
                                         </div>
                                     </div>
 
-                                    {/* Editable Content Area - Auto-expands, no internal scroll */}
-                                    <div className="mb-2">
-                                        <textarea
-                                            ref={textareaRef}
-                                            value={content}
-                                            onChange={(e) => setContent(e.target.value)}
-                                            placeholder="✏️ Type your caption or ask AI to generate..."
-                                            className="w-full min-h-[100px] p-0 bg-transparent border-none text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 resize-none focus:outline-none focus:ring-0 leading-relaxed overflow-hidden"
-                                            style={{ fontFamily: 'inherit', fontSize: 'inherit' }}
-                                        />
-                                    </div>
+                                    {/* Toolbar (Tone) */}
+                                    {activePlatform && (
+                                        <div className="flex items-center justify-between px-4 py-2 bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700">
+                                            <div className="flex items-center gap-2">
+                                                <div className="relative">
+                                                    <button
+                                                        onClick={() => setToneDropdownOpen(!toneDropdownOpen)}
+                                                        className="flex items-center gap-1.5 px-2 py-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-200 transition-colors"
+                                                    >
+                                                        <span className="text-gray-400 dark:text-gray-500 font-normal">Tone:</span>
+                                                        {TONE_OPTIONS.find(t => t.value === (platformTones[activePlatform] || PLATFORM_DEFAULT_TONES[activePlatform]))?.label || 'Select'}
+                                                        <ChevronDown size={14} className="text-gray-400" />
+                                                    </button>
+                                                    {toneDropdownOpen && (
+                                                        <>
+                                                            <div className="fixed inset-0 z-10" onClick={() => setToneDropdownOpen(false)}></div>
+                                                            <div className="absolute top-full left-0 mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-xl z-20 min-w-[180px]">
+                                                                {TONE_OPTIONS.map(tone => (
+                                                                    <button
+                                                                        key={tone.value}
+                                                                        onClick={() => {
+                                                                            setPlatformTones(prev => ({ ...prev, [activePlatform]: tone.value }));
+                                                                            setToneDropdownOpen(false);
+                                                                        }}
+                                                                        className={`w-full text-left px-4 py-2 text-sm hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors first:rounded-t-lg last:rounded-b-lg ${(platformTones[activePlatform] || PLATFORM_DEFAULT_TONES[activePlatform]) === tone.value
+                                                                            ? 'bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 font-medium'
+                                                                            : 'text-gray-700 dark:text-gray-300'
+                                                                            }`}
+                                                                    >
+                                                                        {tone.label}
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        </>
+                                                    )}
+                                                </div>
+                                            </div>
 
-                                    {/* Character count - right below textarea */}
-                                    <p className="text-xs text-gray-500 mb-3 text-right">{content.length}/3000</p>
+                                            <button
+                                                onClick={handleRefineTone}
+                                                disabled={isRefining || !platformDrafts[activePlatform]?.trim()}
+                                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${isRefining || !platformDrafts[activePlatform]?.trim()
+                                                    ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
+                                                    : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300'
+                                                    }`}
+                                            >
+                                                {isRefining ? <RefreshCw size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                                                Refine with AI
+                                            </button>
+                                        </div>
+                                    )}
 
-                                    {/* Image Preview */}
-                                    {uploadedImage && (
-                                        <div className="relative rounded-lg overflow-hidden mb-3">
-                                            <img
-                                                src={uploadedImage}
-                                                alt="Preview"
-                                                className={`w-full object-contain max-h-80 ${loading ? 'opacity-50' : ''}`}
+                                    {/* Content Area */}
+                                    <div className="p-4 bg-white dark:bg-gray-800 flex gap-4 min-h-[160px] rounded-b-xl">
+                                        {/* Avatar */}
+                                        <div className="flex-shrink-0 pt-1">
+                                            <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 flex items-center justify-center text-white text-xs font-bold shadow-sm">
+                                                You
+                                            </div>
+                                        </div>
+
+                                        <div className="flex-1 flex flex-col">
+                                            {/* Header */}
+                                            <div className="flex items-baseline gap-2 mb-1">
+                                                <span className="font-semibold text-gray-900 dark:text-gray-100 text-sm">Your Name</span>
+                                                {activePlatform && <span className="text-xs text-gray-400 capitalize">• {activePlatform}</span>}
+                                            </div>
+
+                                            <textarea
+                                                ref={textareaRef}
+                                                value={content}
+                                                onChange={(e) => setContent(e.target.value)}
+                                                placeholder={activePlatform ? `What do you want to share on ${activePlatform}?` : 'Select or add a platform to start writing...'}
+                                                className="w-full flex-1 min-h-[100px] p-0 bg-transparent border-none text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 resize-none focus:outline-none focus:ring-0 leading-relaxed text-base"
+                                                style={{ fontFamily: 'inherit' }}
                                             />
-                                            {/* Loading overlay for regeneration */}
-                                            {loading && (
-                                                <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                                                    <div className="w-8 h-8 border-4 border-white border-t-transparent rounded-full animate-spin"></div>
+
+
+                                            {/* Character count - right below textarea */}
+                                            <p className="text-xs text-gray-500 mb-3 text-right">{content.length}/3000</p>
+
+                                            {/* Image Preview */}
+                                            {uploadedImage && (
+                                                <div className="relative rounded-lg overflow-hidden mb-3">
+                                                    <img
+                                                        src={uploadedImage}
+                                                        alt="Preview"
+                                                        className={`w-full object-contain max-h-80 ${loading ? 'opacity-50' : ''}`}
+                                                    />
+                                                    {/* Loading overlay for regeneration */}
+                                                    {loading && (
+                                                        <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                                                            <div className="w-8 h-8 border-4 border-white border-t-transparent rounded-full animate-spin"></div>
+                                                        </div>
+                                                    )}
+                                                    {/* Delete Button */}
+                                                    <button
+                                                        onClick={removeImage}
+                                                        className="absolute top-2 right-2 p-1.5 bg-red-500 text-white rounded-full hover:bg-red-600 shadow-lg"
+                                                        title="Remove image"
+                                                    >
+                                                        <X size={16} />
+                                                    </button>
+                                                    {/* Regenerate/Generate AI Button - shown for all images */}
+                                                    {!loading && (
+                                                        <button
+                                                            onClick={generateAIImage}
+                                                            disabled={regenCooldown > 0 || !content.trim()}
+                                                            className={`absolute top-2 right-12 p-1.5 rounded-full text-white shadow-lg transition-colors ${regenCooldown > 0 || !content.trim()
+                                                                ? 'bg-gray-400 cursor-not-allowed'
+                                                                : 'bg-purple-500 hover:bg-purple-600'
+                                                                }`}
+                                                            title={
+                                                                !content.trim()
+                                                                    ? "Add content first"
+                                                                    : regenCooldown > 0
+                                                                        ? `Wait ${regenCooldown}s`
+                                                                        : uploadedImage?.startsWith('blob:')
+                                                                            ? "Regenerate AI image"
+                                                                            : "Replace with AI image"
+                                                            }
+                                                        >
+                                                            {regenCooldown > 0 ? (
+                                                                <span className="text-xs font-bold px-0.5">{regenCooldown}</span>
+                                                            ) : uploadedImage?.startsWith('blob:') ? (
+                                                                <RefreshCw size={16} />
+                                                            ) : (
+                                                                <Sparkles size={16} />
+                                                            )}
+                                                        </button>
+                                                    )}
                                                 </div>
                                             )}
-                                            {/* Delete Button */}
-                                            <button
-                                                onClick={removeImage}
-                                                className="absolute top-2 right-2 p-1.5 bg-red-500 text-white rounded-full hover:bg-red-600 shadow-lg"
-                                                title="Remove image"
-                                            >
-                                                <X size={16} />
-                                            </button>
-                                            {/* Regenerate/Generate AI Button - shown for all images */}
-                                            {!loading && (
-                                                <button
-                                                    onClick={generateAIImage}
-                                                    disabled={regenCooldown > 0 || !content.trim()}
-                                                    className={`absolute top-2 right-12 p-1.5 rounded-full text-white shadow-lg transition-colors ${regenCooldown > 0 || !content.trim()
-                                                        ? 'bg-gray-400 cursor-not-allowed'
-                                                        : 'bg-purple-500 hover:bg-purple-600'
-                                                        }`}
-                                                    title={
-                                                        !content.trim()
-                                                            ? "Add content first"
-                                                            : regenCooldown > 0
-                                                                ? `Wait ${regenCooldown}s`
-                                                                : uploadedImage?.startsWith('blob:')
-                                                                    ? "Regenerate AI image"
-                                                                    : "Replace with AI image"
-                                                    }
-                                                >
-                                                    {regenCooldown > 0 ? (
-                                                        <span className="text-xs font-bold px-0.5">{regenCooldown}</span>
-                                                    ) : uploadedImage?.startsWith('blob:') ? (
-                                                        <RefreshCw size={16} />
-                                                    ) : (
-                                                        <Sparkles size={16} />
-                                                    )}
-                                                </button>
-                                            )}
-                                        </div>
-                                    )}
 
-                                    {/* Image Buttons - Upload or Generate AI */}
-                                    {!uploadedImage && (
-                                        <div className="flex gap-3">
-                                            {/* Upload Image Button */}
-                                            <button
-                                                onClick={() => fileInputRef.current?.click()}
-                                                className="flex-1 py-3 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg text-gray-500 hover:border-blue-400 hover:text-blue-500 transition-colors flex items-center justify-center gap-2"
-                                            >
-                                                <Upload size={18} />
-                                                Upload Image
-                                            </button>
-                                            {/* Generate AI Image Button */}
-                                            <button
-                                                onClick={generateAIImage}
-                                                disabled={loading || regenCooldown > 0 || !content.trim()}
-                                                className={`flex-1 py-3 border-2 border-dashed rounded-lg transition-colors flex items-center justify-center gap-2 ${loading || regenCooldown > 0 || !content.trim()
-                                                    ? 'border-gray-200 dark:border-gray-700 text-gray-400 cursor-not-allowed'
-                                                    : 'border-purple-300 dark:border-purple-600 text-purple-500 hover:border-purple-500 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/20'
-                                                    }`}
-                                                title={!content.trim() ? "Add content first" : regenCooldown > 0 ? `Wait ${regenCooldown}s` : "Generate AI image from your content"}
-                                            >
-                                                {loading ? (
-                                                    <RefreshCw size={18} className="animate-spin" />
-                                                ) : (
-                                                    <Sparkles size={18} />
-                                                )}
-                                                {loading ? 'Generating...' : regenCooldown > 0 ? `Wait ${regenCooldown}s` : 'Generate AI Image'}
-                                            </button>
+                                            {/* Image Buttons - Upload or Generate AI */}
+                                            {!uploadedImage && (
+                                                <div className="flex gap-3">
+                                                    {/* Upload Image Button */}
+                                                    <button
+                                                        onClick={() => fileInputRef.current?.click()}
+                                                        className="flex-1 py-3 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg text-gray-500 hover:border-blue-400 hover:text-blue-500 transition-colors flex items-center justify-center gap-2"
+                                                    >
+                                                        <Upload size={18} />
+                                                        Upload Image
+                                                    </button>
+                                                    {/* Generate AI Image Button */}
+                                                    <button
+                                                        onClick={generateAIImage}
+                                                        disabled={loading || regenCooldown > 0 || !content.trim()}
+                                                        className={`flex-1 py-3 border-2 border-dashed rounded-lg transition-colors flex items-center justify-center gap-2 ${loading || regenCooldown > 0 || !content.trim()
+                                                            ? 'border-gray-200 dark:border-gray-700 text-gray-400 cursor-not-allowed'
+                                                            : 'border-purple-300 dark:border-purple-600 text-purple-500 hover:border-purple-500 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/20'
+                                                            }`}
+                                                        title={!content.trim() ? "Add content first" : regenCooldown > 0 ? `Wait ${regenCooldown}s` : "Generate AI image from your content"}
+                                                    >
+                                                        {loading ? (
+                                                            <RefreshCw size={18} className="animate-spin" />
+                                                        ) : (
+                                                            <Sparkles size={18} />
+                                                        )}
+                                                        {loading ? 'Generating...' : regenCooldown > 0 ? `Wait ${regenCooldown}s` : 'Generate AI Image'}
+                                                    </button>
+                                                </div>
+                                            )}
+                                            <input
+                                                ref={fileInputRef}
+                                                type="file"
+                                                accept="image/jpeg,image/png,image/gif"
+                                                onChange={handleFileChange}
+                                                className="hidden"
+                                            />
                                         </div>
-                                    )}
-                                    <input
-                                        ref={fileInputRef}
-                                        type="file"
-                                        accept="image/jpeg,image/png,image/gif"
-                                        onChange={handleFileChange}
-                                        className="hidden"
-                                    />
+                                    </div>
+
+
                                 </div>
                             </div>
+
 
                             {/* Sticky Footer: Schedule Section */}
                             <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
@@ -4924,7 +5274,7 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
                     </button>
                 )}
             </div>
-        </div>
+        </div >
     );
 };
 
@@ -4949,6 +5299,7 @@ const App = () => {
 
     // --- NEW ONBOARDING STATE ---
     const [interestsCompleted, setInterestsCompleted] = useState(null); // null, true, or false
+    const [userTypeCompleted, setUserTypeCompleted] = useState(null); // null = loading, true = done, false = needs selection
 
     // --- TRENDING TOPICS STATE ---
     const [trendingTopics, setTrendingTopics] = useState([]);
@@ -5240,10 +5591,17 @@ const App = () => {
             // Verify origin for security
             if (event.origin !== window.location.origin) return;
 
-            const { type, status, platform } = event.data || {};
+            const { type, status, platform, message } = event.data || {};
 
             if (type === 'OAUTH_CALLBACK') {
                 console.log(`🔔 [APP] OAuth callback received for ${platform}: ${status}`);
+
+                // Clear the spinner on the Connect button
+                if (window.__clearConnectingPlatform) {
+                    window.__clearConnectingPlatform();
+                }
+
+                const platformName = PLATFORMS.find(p => p.id === platform)?.name || platform;
 
                 if (status === 'success' && platform) {
                     // Update platform connection state
@@ -5252,7 +5610,10 @@ const App = () => {
                         [platform]: true
                     }));
 
-                    // If we're in full integration view, complete it
+                    // Show success toast
+                    addToast(`${platformName} connected successfully!`, 'success');
+
+                    // If we're in full integration view (WhatsApp), complete it
                     if (fullIntegration === platform) {
                         setFullIntegration(null);
                         setView('integrations_page');
@@ -5260,14 +5621,16 @@ const App = () => {
 
                     console.log(`✅ [APP] ${platform} connected successfully!`);
                 } else if (status === 'error') {
-                    console.error(`❌ [APP] OAuth failed for ${platform}`);
+                    const errorDetail = message || 'Unknown error';
+                    addToast(`Failed to connect ${platformName}: ${errorDetail}`, 'error');
+                    console.error(`❌ [APP] OAuth failed for ${platform}: ${errorDetail}`);
                 }
             }
         };
 
         window.addEventListener('message', handleOAuthMessage);
         return () => window.removeEventListener('message', handleOAuthMessage);
-    }, [fullIntegration]);
+    }, [fullIntegration, addToast]);
 
     // Fetch platform connection statuses from backend on app load
     useEffect(() => {
@@ -5412,10 +5775,25 @@ const App = () => {
                 setInterestsCompleted(false);
             });
 
+            // User Type / Account Type Listener
+            const accountTypeRef = doc(db, `users/${userId}/profile/accountType`);
+            const unsubscribeAccountType = onSnapshot(accountTypeRef, (docSnap) => {
+                if (docSnap.exists() && docSnap.data().userType) {
+                    setUserTypeCompleted(true);
+                    console.log('✅ User type loaded:', docSnap.data().userType);
+                } else {
+                    setUserTypeCompleted(false);
+                }
+            }, (error) => {
+                console.error('Error listening to account type:', error);
+                setUserTypeCompleted(false);
+            });
+
 
             return () => {
                 unsubscribeTheme();
                 unsubscribeOnboarding();
+                unsubscribeAccountType();
             };
         }
     }, [db, userId]);
@@ -5483,7 +5861,9 @@ const App = () => {
         // Users go directly to dashboard after login
 
         // Priority 3: Full Screen Integration
-        if (fullIntegration) {
+        // Only show FullIntegrationView for WhatsApp (OTP flow)
+        // Other platforms use direct popup OAuth from the Integrations page
+        if (fullIntegration === 'whatsapp') {
             return <FullIntegrationView
                 platformId={fullIntegration}
                 onBack={handleIntegrationBack}
@@ -5520,8 +5900,9 @@ const App = () => {
             case 'integrations_page':
                 return <IntegrationsPageContent
                     setFullIntegration={setFullIntegration}
-                    platformConnections={platformConnections} // Pass connection state
-                    setPlatformConnections={setPlatformConnections} // Pass setter for disconnect
+                    platformConnections={platformConnections}
+                    setPlatformConnections={setPlatformConnections}
+                    addToast={addToast}
                 />;
             case 'trending_panel':
                 return <TrendingSidebarContent
@@ -5600,8 +5981,21 @@ const App = () => {
                 />
             )}
 
-            {/* Show main app content only for authenticated (non-anonymous) users */}
-            {user && !user.isAnonymous && (
+            {/* Show User Type Onboarding for authenticated users who haven't selected their type */}
+            {user && !user.isAnonymous && userTypeCompleted === false && (
+                <UserTypeOnboarding
+                    db={db}
+                    userId={userId}
+                    isDarkMode={isDarkMode}
+                    onComplete={(type) => {
+                        console.log(`✅ User type selected: ${type}`);
+                        setUserTypeCompleted(true);
+                    }}
+                />
+            )}
+
+            {/* Show main app content only for authenticated (non-anonymous) users who completed user type */}
+            {user && !user.isAnonymous && userTypeCompleted !== false && (
                 <div className={containerClasses}>
                     <Sidebar
                         isDarkMode={isDarkMode}

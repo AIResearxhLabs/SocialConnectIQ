@@ -657,6 +657,7 @@ export const chatWithAI = async (message, currentContent, conversationHistory = 
             success: true,
             reply: data.reply || data.message || 'AI response received',
             suggested_content: data.suggested_content,
+            suggested_platforms: data.suggested_platforms || null,
             action: data.action,
             action_result: data.action_result
         };
@@ -666,6 +667,50 @@ export const chatWithAI = async (message, currentContent, conversationHistory = 
             success: false,
             reply: `Connection error: ${error.message}`
         };
+    }
+};
+
+
+/**
+ * Refine content for a specific platform with a specific tone
+ * @param {string} content - Content to refine
+ * @param {string} platform - Target platform (linkedin, twitter, etc.)
+ * @param {string} tone - Desired tone (professional, casual, etc.)
+ * @returns {Promise<{success: boolean, refined_content?: string, error?: string}>}
+ */
+export const refineTone = async (content, platform, tone) => {
+    const correlationId = generateCorrelationId();
+    const { userId } = await getUserAuth();
+    const headers = await createHeaders(correlationId);
+
+    const AGENT_SERVICE_URL = API_CONFIG.AGENT_SERVICE_URL || 'http://localhost:8006';
+    const url = `${AGENT_SERVICE_URL}/agent/refine-tone`;
+
+    console.log(`🎨 [FRONTEND] Refining tone: platform=${platform}, tone=${tone}`);
+
+    try {
+        const response = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({
+                user_id: userId,
+                content,
+                platform,
+                tone,
+            }),
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            return { success: false, error: errorData.detail || 'Failed to refine tone' };
+        }
+
+        const data = await response.json();
+        console.log(`✅ [FRONTEND] Tone refinement complete for ${platform}`);
+        return data;
+    } catch (error) {
+        console.error('❌ [FRONTEND] Refine tone exception:', error);
+        return { success: false, error: error.message };
     }
 };
 

@@ -21,6 +21,7 @@ from .config import settings
 from .mcp_client import MCPClient
 from .linkedin_agent import LinkedInOAuthAgent
 from .twitter_agent import TwitterOAuthAgent
+from .facebook_agent import FacebookOAuthAgent
 from .content_agent import ContentRefinementAgent
 from .trending_agent import TrendingTopicsAgent
 
@@ -55,6 +56,7 @@ correlation_logger = CorrelationLogger(
 mcp_client: Optional[MCPClient] = None
 linkedin_agent: Optional[LinkedInOAuthAgent] = None
 twitter_agent: Optional[TwitterOAuthAgent] = None
+facebook_agent: Optional[FacebookOAuthAgent] = None
 content_agent: Optional[ContentRefinementAgent] = None
 trending_agent: Optional[TrendingTopicsAgent] = None
 
@@ -120,6 +122,26 @@ def get_platform_token(user_id: str, platform: str) -> Optional[str]:
         logger.error(f"Error fetching {platform} token: {e}")
         return None
 
+
+def get_business_context(user_id: str) -> Optional[dict]:
+    """Retrieve business profile context for a user from Firestore.
+    Returns the business profile dict if user is a business user, else None.
+    """
+    if db is None:
+        return None
+    try:
+        account_ref = db.document(f'users/{user_id}/profile/accountType')
+        account_doc = account_ref.get()
+        if account_doc.exists:
+            data = account_doc.to_dict()
+            if data.get('userType') == 'business' and data.get('businessProfile'):
+                logger.info(f"✅ Business context found for user {user_id}: {data['businessProfile'].get('businessName', 'Unknown')}")
+                return data['businessProfile']
+        return None
+    except Exception as e:
+        logger.error(f"Error fetching business context for {user_id}: {e}")
+        return None
+
 # Helper to save post history
 async def save_post_history(user_id: str, content: str, platforms: list, results: dict):
     """Save posted content to Firestore 'scheduled_posts' collection so it appears in Calendar"""
@@ -171,7 +193,7 @@ async def save_post_history(user_id: str, content: str, platforms: list, results
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifecycle manager for the application"""
-    global mcp_client, linkedin_agent, twitter_agent, content_agent, trending_agent
+    global mcp_client, linkedin_agent, twitter_agent, facebook_agent, content_agent, trending_agent
     
     # Startup
     logger.info("Initializing Agent Service...")
@@ -199,6 +221,13 @@ async def lifespan(app: FastAPI):
             openai_api_key=settings.openai.api_key
         )
         logger.info("Twitter OAuth Agent initialized")
+        
+        # Initialize Facebook agent
+        facebook_agent = FacebookOAuthAgent(
+            mcp_client=mcp_client,
+            openai_api_key=settings.openai.api_key
+        )
+        logger.info("Facebook OAuth Agent initialized")
         
         # Initialize Content Refinement agent
         content_agent = ContentRefinementAgent(
@@ -321,10 +350,12 @@ class HandleCallbackResponse(BaseModel):
     error: Optional[str] = None
 
 
+
 class PostContentRequest(BaseModel):
     content: str
     access_token: str
     user_id: str
+    page_id: Optional[str] = None
 
 
 class PostContentResponse(BaseModel):
@@ -378,6 +409,7 @@ class ChatResponse(BaseModel):
     success: bool
     reply: str
     suggested_content: Optional[str] = None
+    suggested_platforms: Optional[dict] = None  # Per-platform content: {"linkedin": "...", "twitter": "..."}
     action: Optional[str] = None  # "posted", "scheduled", None
     action_result: Optional[dict] = None  # Details of action taken
     error: Optional[str] = None
@@ -755,6 +787,68 @@ async def linkedin_handle_callback(request: Request, callback_request: HandleCal
         )
 
 
+@app.post("/agent/facebook/post-content", response_model=PostContentResponse)
+async def facebook_post_content(request: Request, post_request: PostContentRequest):
+    """
+    Post content to Facebook via AI agent
+    """
+    correlation_id = getattr(request.state, "correlation_id", "unknown")
+    
+    try:
+        if not facebook_agent:
+            correlation_logger.error(
+                "Facebook agent not initialized",
+                correlation_id=correlation_id,
+                user_id=post_request.user_id
+            )
+            raise HTTPException(status_code=503, detail="Facebook agent not initialized")
+        
+        correlation_logger.info(
+            f"Posting content to Facebook",
+            correlation_id=correlation_id,
+            user_id=post_request.user_id,
+            additional_data={"content_length": len(post_request.content)}
+        )
+        
+        # Execute agent workflow
+        result = await facebook_agent.execute({
+            "user_id": post_request.user_id,
+            "action": "post_content",
+            "content": post_request.content,
+            "access_token": post_request.access_token,
+            "page_id": post_request.page_id,
+            "correlation_id": correlation_id
+        })
+        
+        correlation_logger.success(
+            f"Facebook post result",
+            correlation_id=correlation_id,
+            user_id=post_request.user_id,
+            additional_data={"success": result.get("success")}
+        )
+        
+        return PostContentResponse(
+            success=result["success"],
+            result=result.get("result"),
+            error=result.get("error")
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in facebook_post_content: {str(e)}")
+        
+        correlation_logger.error(
+            f"Error in facebook_post_content: {str(e)}",
+            correlation_id=correlation_id,
+            user_id=post_request.user_id,
+            additional_data={"error": str(e)}
+        )
+        
+        return PostContentResponse(
+            success=False,
+            error=str(e)
+        )
+
+
 @app.post("/agent/linkedin/post-content", response_model=PostContentResponse)
 async def linkedin_post_content(request: Request, post_request: PostContentRequest):
     """
@@ -931,6 +1025,119 @@ async def twitter_handle_callback(request: Request, callback_request: HandleCall
         
         correlation_logger.error(
             f"Error in handle_callback: {str(e)}",
+            correlation_id=correlation_id,
+            user_id=callback_request.user_id,
+            additional_data={"error": str(e)}
+        )
+        
+        return HandleCallbackResponse(
+            success=False,
+            error=str(e)
+        )
+
+
+# Facebook OAuth Endpoints
+@app.post("/agent/facebook/auth", response_model=GetAuthUrlResponse)
+async def facebook_auth(
+    request: GetAuthUrlRequest,
+    x_correlation_id: Optional[str] = Header(None, alias="X-Correlation-ID")
+):
+    """
+    Unified Facebook OAuth endpoint via AI agent with LLM-driven MCP integration
+    """
+    correlation_id = x_correlation_id or "unknown"
+    
+    try:
+        if not facebook_agent:
+            logger.error(
+                f"Agent Service: Facebook agent not initialized | correlation_id={correlation_id}"
+            )
+            raise HTTPException(status_code=503, detail="Facebook agent not initialized")
+        
+        logger.info(
+            f"Agent Service: Received Facebook auth request | "
+            f"correlation_id={correlation_id} | user_id={request.user_id}"
+        )
+        
+        # Execute agent workflow with LLM reasoning
+        result = await facebook_agent.execute({
+            "user_id": request.user_id,
+            "action": "get_auth_url",
+            "correlation_id": correlation_id
+        })
+        
+        logger.info(
+            f"Agent Service: Facebook agent execution completed | "
+            f"correlation_id={correlation_id} | success={result['success']}"
+        )
+        
+        return GetAuthUrlResponse(
+            success=result["success"],
+            auth_url=result.get("auth_url"),
+            state=result.get("state"),
+            error=result.get("error")
+        )
+        
+    except Exception as e:
+        logger.error(
+            f"Agent Service: Error in facebook_auth | "
+            f"correlation_id={correlation_id} | error={str(e)}"
+        )
+        return GetAuthUrlResponse(
+            success=False,
+            error=str(e)
+        )
+
+
+@app.post("/agent/facebook/handle-callback", response_model=HandleCallbackResponse)
+async def facebook_handle_callback(request: Request, callback_request: HandleCallbackRequest):
+    """
+    Handle Facebook OAuth callback via AI agent
+    """
+    correlation_id = getattr(request.state, "correlation_id", "unknown")
+    
+    try:
+        if not facebook_agent:
+            correlation_logger.error(
+                "Facebook agent not initialized",
+                correlation_id=correlation_id,
+                user_id=callback_request.user_id
+            )
+            raise HTTPException(status_code=503, detail="Facebook agent not initialized")
+        
+        correlation_logger.info(
+            f"Handling Facebook callback",
+            correlation_id=correlation_id,
+            user_id=callback_request.user_id,
+            additional_data={"has_code": bool(callback_request.code)}
+        )
+        
+        # Execute agent workflow
+        result = await facebook_agent.execute({
+            "user_id": callback_request.user_id,
+            "action": "handle_callback",
+            "code": callback_request.code,
+            "correlation_id": correlation_id
+        })
+        
+        correlation_logger.success(
+            f"Facebook callback handled",
+            correlation_id=correlation_id,
+            user_id=callback_request.user_id,
+            additional_data={"success": result.get("success")}
+        )
+        
+        return HandleCallbackResponse(
+            success=result["success"],
+            result=result.get("result"),
+            error=result.get("error")
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in Facebook handle_callback: {str(e)}")
+        
+        correlation_logger.error(
+            f"Error in Facebook handle_callback: {str(e)}",
             correlation_id=correlation_id,
             user_id=callback_request.user_id,
             additional_data={"error": str(e)}
@@ -1511,8 +1718,29 @@ CURRENT CONTEXT:
 - User's connected platforms: {connected_str}
 - User's currently selected platforms: {selected_str}
 - Current date/time: {datetime.now().strftime("%Y-%m-%d %H:%M")}
+"""
+        
+        # Inject business context if the user is a business account
+        biz_context = get_business_context(chat_request.user_id)
+        if biz_context:
+            biz_name = biz_context.get('businessName', '')
+            biz_category = biz_context.get('category', '')
+            biz_audience = biz_context.get('targetAudience', '')
+            biz_website = biz_context.get('websiteUrl', '')
+            
+            system_prompt += f"""BUSINESS CONTEXT (this user is a business account):
+- Business Name: {biz_name}
+- Industry/Category: {biz_category}
+- Target Audience: {biz_audience}
+{f'- Website: {biz_website}' if biz_website else ''}
 
-CAPABILITIES:
+IMPORTANT: Tailor ALL content to this business's brand, industry, and target audience.
+Use language and topics that resonate with their specific audience.
+When writing posts, reflect the professional identity of {biz_name}.
+
+"""
+        
+        system_prompt += f"""CAPABILITIES:
 1. **Write Content**: Help write engaging posts for social media
 2. **Post Now**: When user says "post this", "publish", or "send now" - use the post_to_platforms function
 3. **Schedule**: When user says "schedule for..." - use the schedule_post function
@@ -1530,11 +1758,25 @@ GUIDELINES FOR POSTING/SCHEDULING:
 - For scheduling, parse dates naturally (e.g., "tomorrow at 9am" → appropriate date/time)
 
 FORMAT FOR CONTENT RESPONSES:
-When writing/refining content, format as:
+When the user asks you to write/generate content and MULTIPLE platforms are selected, you MUST return separate versions tailored to each platform using this exact format:
+
+[Your message to the user]
+
+---LINKEDIN---
+[LinkedIn version - professional tone, longer, with hashtags]
+---TWITTER---
+[Twitter version - concise, under 280 chars, with 1-2 hashtags]
+---FACEBOOK---
+[Facebook version - engaging, storytelling, with emojis]
+---INSTAGRAM---
+[Instagram version - casual, visual language, with hashtags]
+---END---
+
+Only include sections for the platforms that are currently selected. If only ONE platform is selected, use the simpler format:
 [Your message to the user]
 
 ---POST---
-[The actual post content]
+[The post content]
 ---END---
 
 When executing actions (posting/scheduling), just respond naturally confirming what you did."""
@@ -1712,6 +1954,47 @@ When executing actions (posting/scheduling), just respond naturally confirming w
             if content_part:
                 suggested_content = content_part
         
+        # Check for per-platform format (---LINKEDIN---, ---TWITTER---, etc.)
+        platform_markers = ['LINKEDIN', 'TWITTER', 'FACEBOOK', 'INSTAGRAM']
+        has_platform_format = any(f"---{p}---" in ai_response for p in platform_markers)
+        
+        suggested_platforms = None
+        if has_platform_format:
+            suggested_platforms = {}
+            # Extract the reply (text before first platform marker)
+            first_marker_pos = len(ai_response)
+            for p in platform_markers:
+                marker = f"---{p}---"
+                pos = ai_response.find(marker)
+                if pos != -1 and pos < first_marker_pos:
+                    first_marker_pos = pos
+            reply = ai_response[:first_marker_pos].strip()
+            
+            # Extract each platform's content
+            for p in platform_markers:
+                marker = f"---{p}---"
+                if marker in ai_response:
+                    start = ai_response.find(marker) + len(marker)
+                    # Find next marker or ---END---
+                    end = len(ai_response)
+                    for next_p in platform_markers:
+                        next_marker = f"---{next_p}---"
+                        if next_marker != marker:
+                            next_pos = ai_response.find(next_marker, start)
+                            if next_pos != -1 and next_pos < end:
+                                end = next_pos
+                    end_pos = ai_response.find("---END---", start)
+                    if end_pos != -1 and end_pos < end:
+                        end = end_pos
+                    platform_content = ai_response[start:end].strip()
+                    if platform_content:
+                        suggested_platforms[p.lower()] = platform_content
+            
+            # Also set suggested_content to first platform's content for backward compat
+            if suggested_platforms:
+                suggested_content = next(iter(suggested_platforms.values()))
+                logger.info(f"Parsed per-platform content for: {list(suggested_platforms.keys())}")
+        
         correlation_logger.success(
             f"AI Chat response generated",
             correlation_id=correlation_id,
@@ -1725,7 +2008,8 @@ When executing actions (posting/scheduling), just respond naturally confirming w
         return ChatResponse(
             success=True,
             reply=reply,
-            suggested_content=suggested_content
+            suggested_content=suggested_content,
+            suggested_platforms=suggested_platforms
         )
         
     except Exception as e:
@@ -1737,6 +2021,89 @@ When executing actions (posting/scheduling), just respond naturally confirming w
         return ChatResponse(
             success=False,
             reply=f"Sorry, I encountered an error: {str(e)}",
+            error=str(e)
+        )
+
+
+# ============================================================
+# REFINE TONE ENDPOINT
+# ============================================================
+
+class RefineToneRequest(BaseModel):
+    user_id: str
+    content: str
+    platform: str   # linkedin, twitter, facebook, instagram
+    tone: str       # professional, casual, humorous, enthusiastic, informative, neutral
+
+
+class RefineToneResponse(BaseModel):
+    success: bool
+    refined_content: Optional[str] = None
+    error: Optional[str] = None
+
+
+@app.post("/agent/refine-tone", response_model=RefineToneResponse)
+async def refine_tone(
+    request: Request,
+    req: RefineToneRequest,
+    x_correlation_id: Optional[str] = Header(None, alias="X-Correlation-ID")
+):
+    """
+    Refine content for a specific platform with a specific tone.
+    Used by the per-platform Composer tone controls.
+    """
+    correlation_id = x_correlation_id or f"refine-{req.user_id}-{id(request)}"
+    
+    correlation_logger.info(
+        f"Refine tone request",
+        correlation_id=correlation_id,
+        additional_data={
+            "user_id": req.user_id,
+            "platform": req.platform,
+            "tone": req.tone,
+            "content_length": len(req.content)
+        }
+    )
+    
+    try:
+        if not content_agent:
+            raise HTTPException(status_code=503, detail="Content agent not initialized")
+        
+        # Fetch business context for business users
+        biz_context = get_business_context(req.user_id)
+        
+        result = await content_agent.refine_content(
+            original_content=req.content,
+            user_id=req.user_id,
+            correlation_id=correlation_id,
+            tone=req.tone,
+            platform=req.platform,
+            business_context=biz_context
+        )
+        
+        if result.get("success"):
+            correlation_logger.success(
+                f"Tone refinement complete",
+                correlation_id=correlation_id,
+                additional_data={"platform": req.platform, "tone": req.tone}
+            )
+            return RefineToneResponse(
+                success=True,
+                refined_content=result.get("refined_content")
+            )
+        else:
+            return RefineToneResponse(
+                success=False,
+                error=result.get("error", "Refinement failed")
+            )
+            
+    except Exception as e:
+        correlation_logger.error(
+            f"Refine tone error: {str(e)}",
+            correlation_id=correlation_id
+        )
+        return RefineToneResponse(
+            success=False,
             error=str(e)
         )
 

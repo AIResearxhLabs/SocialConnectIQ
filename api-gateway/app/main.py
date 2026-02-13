@@ -191,15 +191,15 @@ async def route_linkedin_callback(code: str, state: str = None):
             
             # If it's a redirect, return it
             if response.status_code in (301, 302, 303, 307, 308):
-                return RedirectResponse(url=response.headers.get('location', 'http://localhost:3000/dashboard/integration'))
+                return RedirectResponse(url=response.headers.get('location', 'http://localhost:3000/oauth-callback.html?status=error&platform=linkedin&message=no_redirect_location'))
             
             response.raise_for_status()
             return JSONResponse(content=response.json(), status_code=response.status_code)
         except httpx.RequestError as exc:
-            # On error, redirect to frontend with error status
-            return RedirectResponse(url="http://localhost:3000/dashboard/integration?status=error&platform=linkedin")
+            # On error, redirect to oauth-callback.html so popup can postMessage and close
+            return RedirectResponse(url="http://localhost:3000/oauth-callback.html?status=error&platform=linkedin&message=gateway_request_error")
         except httpx.HTTPStatusError as exc:
-            return RedirectResponse(url="http://localhost:3000/dashboard/integration?status=error&platform=linkedin")
+            return RedirectResponse(url="http://localhost:3000/oauth-callback.html?status=error&platform=linkedin&message=gateway_http_error")
 
 
 @app.get("/api/integrations/linkedin/status")
@@ -293,12 +293,12 @@ async def route_facebook_callback(code: str, state: str = None):
             )
             
             if response.status_code in (301, 302, 303, 307, 308):
-                return RedirectResponse(url=response.headers.get('location', 'http://localhost:3000/dashboard/integration'))
+                return RedirectResponse(url=response.headers.get('location', 'http://localhost:3000/oauth-callback.html?status=error&platform=facebook&message=no_redirect_location'))
             
             response.raise_for_status()
             return JSONResponse(content=response.json(), status_code=response.status_code)
         except (httpx.RequestError, httpx.HTTPStatusError):
-            return RedirectResponse(url="http://localhost:3000/dashboard/integration?status=error&platform=facebook")
+            return RedirectResponse(url="http://localhost:3000/oauth-callback.html?status=error&platform=facebook&message=gateway_error")
 
 
 @app.get("/api/integrations/facebook/status")
@@ -375,12 +375,12 @@ async def route_twitter_callback(code: str, state: str = None):
             )
             
             if response.status_code in (301, 302, 303, 307, 308):
-                return RedirectResponse(url=response.headers.get('location', 'http://localhost:3000/dashboard/integration'))
+                return RedirectResponse(url=response.headers.get('location', 'http://localhost:3000/oauth-callback.html?status=error&platform=twitter&message=no_redirect_location'))
             
             response.raise_for_status()
             return JSONResponse(content=response.json(), status_code=response.status_code)
         except (httpx.RequestError, httpx.HTTPStatusError):
-            return RedirectResponse(url="http://localhost:3000/dashboard/integration?status=error&platform=twitter")
+            return RedirectResponse(url="http://localhost:3000/oauth-callback.html?status=error&platform=twitter&message=gateway_error")
 
 
 @app.get("/api/integrations/twitter/status")

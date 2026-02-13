@@ -390,6 +390,130 @@ class MCPClient:
             correlation_id=correlation_id,
             user_id=user_id
         )
+
+    # =========================================================================
+    # Facebook OAuth Methods
+    # =========================================================================
+
+    async def get_facebook_auth_url(self, user_id: str, correlation_id: str = "unknown", callback_url: str = None) -> Dict[str, Any]:
+        """
+        Get Facebook OAuth authorization URL with correlation tracking
+        Args:
+            user_id: User identifier
+            correlation_id: Correlation ID for request tracing
+            callback_url: Optional callback URL to override MCP server default
+        Returns: Dict containing auth_url and state
+        """
+        import os
+        start_time = time.time()
+        
+        # Get callback URL from environment if not provided
+        if not callback_url:
+            callback_url = os.getenv("FACEBOOK_REDIRECT_URI", "http://localhost:8000/api/integrations/facebook/callback")
+        
+        logger.info(
+            f"MCP Client: Calling getFacebookAuthUrl tool | "
+            f"correlation_id={correlation_id} | user_id={user_id} | "
+            f"callback_url={callback_url}"
+        )
+        
+        try:
+            # Pass callbackUrl parameter to MCP server
+            parameters = {
+                "callbackUrl": callback_url
+            }
+            
+            result = await self.invoke_tool(
+                tool_name="getFacebookAuthUrl",
+                parameters=parameters,
+                correlation_id=correlation_id,
+                user_id=user_id
+            )
+            
+            elapsed = time.time() - start_time
+            logger.info(
+                f"MCP Client: getFacebookAuthUrl completed in {elapsed:.2f}s | "
+                f"correlation_id={correlation_id} | "
+                f"has_auth_url={'auth_url' in result or 'authUrl' in result}"
+            )
+            
+            return result
+            
+        except Exception as e:
+            elapsed = time.time() - start_time
+            logger.error(
+                f"MCP Client: getFacebookAuthUrl failed after {elapsed:.2f}s | "
+                f"correlation_id={correlation_id} | error={str(e)}"
+            )
+            raise
+
+    async def handle_facebook_callback(
+        self, 
+        code: str, 
+        user_id: str, 
+        callback_url: str = None,
+        correlation_id: str = "unknown"
+    ) -> Dict[str, Any]:
+        """
+        Handle Facebook OAuth callback and exchange code for tokens
+        Args:
+            code: Authorization code from Facebook
+            user_id: User identifier
+            callback_url: Optional callback URL (must match the one used in auth URL)
+            correlation_id: Correlation ID for request tracing
+        Returns: Dict containing access tokens and user info
+        """
+        import os
+        
+        # Get callback URL from environment if not provided
+        if not callback_url:
+            callback_url = os.getenv("FACEBOOK_REDIRECT_URI", "http://localhost:8000/api/integrations/facebook/callback")
+        
+        # Pass callbackUrl parameter to MCP server
+        parameters = {
+            "code": code,
+            "callbackUrl": callback_url
+        }
+        
+        return await self.invoke_tool(
+            tool_name="exchangeFacebookAuthCode",
+            parameters=parameters,
+            correlation_id=correlation_id,
+            user_id=user_id
+        )
+
+    async def post_to_facebook(
+        self, 
+        content: str, 
+        access_token: str, 
+        user_id: str,
+        page_id: str = None,
+        correlation_id: str = "unknown"
+    ) -> Dict[str, Any]:
+        """
+        Post content to Facebook Page
+        Args:
+            content: Content to post
+            access_token: Facebook Page access token (or user token if posting to profile)
+            user_id: User identifier
+            page_id: Optional Page ID if targeting a specific page
+            correlation_id: Correlation ID for request tracing
+        Returns: Post result
+        """
+        params = {
+            "content": content,
+            "accessToken": access_token,
+            "userId": user_id
+        }
+        if page_id:
+            params["pageId"] = page_id
+            
+        return await self.invoke_tool(
+            tool_name="postToFacebook",
+            parameters=params,
+            correlation_id=correlation_id,
+            user_id=user_id
+        )
     
     async def get_twitter_auth_url(self, user_id: str, correlation_id: str = "unknown", callback_url: str = None) -> Dict[str, Any]:
         """
@@ -511,6 +635,133 @@ class MCPClient:
                 "accessToken": access_token,
                 "userId": user_id
             },
+            correlation_id=correlation_id,
+            user_id=user_id
+        )
+    
+    async def get_facebook_auth_url(self, user_id: str, correlation_id: str = "unknown", callback_url: str = None) -> Dict[str, Any]:
+        """
+        Get Facebook OAuth authorization URL with correlation tracking
+        Args:
+            user_id: User identifier
+            correlation_id: Correlation ID for request tracing
+            callback_url: Optional callback URL to override MCP server default
+        Returns: Dict containing auth_url and state
+        """
+        import os
+        start_time = time.time()
+        
+        # Get callback URL from environment if not provided
+        if not callback_url:
+            callback_url = os.getenv("FACEBOOK_REDIRECT_URI", "http://localhost:8002/api/integrations/facebook/callback")
+        
+        logger.info(
+            f"MCP Client: Calling getFacebookAuthUrl tool | "
+            f"correlation_id={correlation_id} | user_id={user_id} | "
+            f"callback_url={callback_url} | "
+            f"mcp_url={self.mcp_server_url}"
+        )
+        
+        try:
+            # Pass callbackUrl parameter to MCP server (as per MCP schema)
+            parameters = {
+                "callbackUrl": callback_url
+            }
+            
+            result = await self.invoke_tool(
+                tool_name="getFacebookAuthUrl",
+                parameters=parameters,
+                correlation_id=correlation_id,
+                user_id=user_id
+            )
+            
+            elapsed = time.time() - start_time
+            logger.info(
+                f"MCP Client: getFacebookAuthUrl completed in {elapsed:.2f}s | "
+                f"correlation_id={correlation_id} | "
+                f"has_auth_url={'auth_url' in result or 'authUrl' in result}"
+            )
+            
+            return result
+            
+        except Exception as e:
+            elapsed = time.time() - start_time
+            logger.error(
+                f"MCP Client: getFacebookAuthUrl failed after {elapsed:.2f}s | "
+                f"correlation_id={correlation_id} | error={str(e)}"
+            )
+            raise
+    
+    async def handle_facebook_callback(
+        self, 
+        code: str, 
+        user_id: str, 
+        callback_url: str = None,
+        correlation_id: str = "unknown"
+    ) -> Dict[str, Any]:
+        """
+        Handle Facebook OAuth callback and exchange code for tokens
+        Args:
+            code: Authorization code from Facebook
+            user_id: User identifier
+            callback_url: Optional callback URL (must match the one used in auth URL)
+            correlation_id: Correlation ID for request tracing
+        Returns: Dict containing access tokens and page info
+        """
+        import os
+        
+        # Get callback URL from environment if not provided
+        if not callback_url:
+            callback_url = os.getenv("FACEBOOK_REDIRECT_URI", "http://localhost:8002/api/integrations/facebook/callback")
+        
+        logger.info(
+            f"MCP Client: Calling exchangeFacebookAuthCode tool | "
+            f"correlation_id={correlation_id} | user_id={user_id}"
+        )
+        
+        # Pass code and callbackUrl to MCP server
+        parameters = {
+            "code": code,
+            "callbackUrl": callback_url
+        }
+        
+        return await self.invoke_tool(
+            tool_name="exchangeFacebookAuthCode",
+            parameters=parameters,
+            correlation_id=correlation_id,
+            user_id=user_id
+        )
+    
+    async def post_to_facebook(
+        self, 
+        content: str, 
+        access_token: str, 
+        user_id: str,
+        page_id: str = None,
+        correlation_id: str = "unknown"
+    ) -> Dict[str, Any]:
+        """
+        Post content to Facebook Page
+        Args:
+            content: Content to post
+            access_token: Facebook Page access token
+            user_id: User identifier
+            page_id: Facebook Page ID (optional, MCP may resolve it)
+            correlation_id: Correlation ID for request tracing
+        Returns: Post result
+        """
+        parameters = {
+            "content": content,
+            "accessToken": access_token,
+            "userId": user_id
+        }
+        
+        if page_id:
+            parameters["pageId"] = page_id
+        
+        return await self.invoke_tool(
+            tool_name="postToFacebook",
+            parameters=parameters,
             correlation_id=correlation_id,
             user_id=user_id
         )

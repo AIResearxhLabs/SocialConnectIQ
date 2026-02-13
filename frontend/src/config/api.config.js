@@ -7,7 +7,7 @@
 const getApiBaseUrl = () => {
   // In development, use the configured backend service URL
   // In production, this would be the deployed backend URL
-  return import.meta.env.VITE_API_BASE_URL || 'http://localhost:8002';
+  return import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
 };
 
 const getGatewayUrl = () => {

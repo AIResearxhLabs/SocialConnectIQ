@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SocialConnectIQ</title>
+  <script>
+    (function () {
+      try {
+        const theme = localStorage.getItem('theme');
+        if (theme === 'dark') {
+          document.documentElement.classList.add('dark');
+        }
+      } catch (_) {}
+    })();
+  </script>
+</head>
+
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.jsx"></script>
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyDfdJfZlEq7dqnsuRjB11ccQoxThXcCqgU",
+      authDomain: "connectiq-37c4b.firebaseapp.com",
+      projectId: "connectiq-37c4b",
+      storageBucket: "connectiq-37c4b.firebasestorage.app",
+      messagingSenderId: "731838239681",
+      appId: "1:731838239681:web:715fed87612008db021540",
+      measurementId: "G-W6CWH1ESX2"
+    };
+  </script>
+
+</body>
+
+</html>

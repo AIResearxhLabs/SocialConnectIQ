@@ -23,7 +23,7 @@ _project_root = os.path.abspath(os.path.join(_current_dir, "../../.."))
 _env_path = os.path.join(_project_root, ".env")
 
 if os.path.exists(_env_path):
-    load_dotenv(_env_path)
+    load_dotenv(_env_path, override=True)
     logger.info(f"✅ Loaded environment from: {_env_path}")
 else:
     logger.warning(f"⚠️ .env file not found at: {_env_path}")

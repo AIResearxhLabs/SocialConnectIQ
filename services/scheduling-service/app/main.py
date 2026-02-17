@@ -14,7 +14,7 @@ import logging
 
 # Load environment variables
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(override=True)
 
 # Firebase Admin SDK
 import firebase_admin

@@ -4,7 +4,7 @@ Configuration management for Backend Service
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(override=True)
 
 class Config:
     """Application configuration"""

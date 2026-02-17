@@ -76,38 +76,44 @@ class TwitterOAuthAgent:
         return workflow.compile()
     
     async def _analyze_request(self, state: TwitterAgentState) -> TwitterAgentState:
-        """Analyze the request and determine the action"""
+        """
+        Analyze the request and determine the action (Deterministic validation)
+        REMOVED LLM CALL to prevent 429 errors during simple auth flows.
+        """
         logger.info(f"Analyzing request for user: {state['user_id']}, action: {state['action']}")
         
-        # Use AI to validate and enhance the request
-        prompt = ChatPromptTemplate.from_messages([
-            SystemMessage(content="""You are an AI agent that manages Twitter/X OAuth workflows.
-            Analyze the user's request and validate that all required parameters are present.
-            Return 'valid' if the request can proceed, or explain what's missing."""),
-            HumanMessage(content=f"""
-            Action: {state['action']}
-            User ID: {state['user_id']}
-            OAuth Code: {state.get('code', 'Not provided')}
-            Access Token: {state.get('access_token', 'Not provided')}
-            Content: {state.get('content', 'Not provided')}
-            
-            Is this request valid for the specified action?
-            """)
-        ])
+        action = state.get('action')
         
-        try:
-            response = await self.llm.ainvoke(prompt.format_messages())
-            logger.info(f"AI Analysis: {response.content}")
+        # Deterministic Validation Logic
+        if action == 'get_auth_url':
+            # Always valid to request auth URL
+            validation_msg = "Requesting Auth URL is valid."
             
-            state["messages"] = [
-                SystemMessage(content="Twitter OAuth workflow initialized"),
-                HumanMessage(content=f"Requested action: {state['action']}"),
-                AIMessage(content=response.content)
-            ]
+        elif action == 'handle_callback':
+            if not state.get('code'):
+                state["error"] = "Missing 'code' for callback handling"
+                return state
+            validation_msg = "Callback request contains required code."
             
-        except Exception as e:
-            logger.error(f"Error in AI analysis: {str(e)}")
-            state["error"] = f"AI analysis failed: {str(e)}"
+        elif action == 'post_content':
+            if not state.get('content'):
+                state["error"] = "Missing 'content' payload"
+                return state
+            if not state.get('access_token'):
+                state["error"] = "Missing 'access_token'"
+                return state
+            validation_msg = "Post request contains content and token."
+            
+        else:
+            state["error"] = f"Unknown or unsupported action: {action}"
+            return state
+
+        # Log success simulation
+        state["messages"] = [
+            SystemMessage(content="Twitter OAuth workflow initialized"),
+            HumanMessage(content=f"Requested action: {state['action']}"),
+            AIMessage(content=f"Validation Successful: {validation_msg}")
+        ]
         
         return state
     

@@ -14,10 +14,16 @@ import {
     collection,
     query,
     serverTimestamp,
-    orderBy
+    orderBy,
+    increment
 } from "firebase/firestore";
+import { aiService } from './api/ai';
 import { auth, db } from "./firebase";
-import { Sun, Moon, LayoutDashboard, Send, BarChart2, Settings, Zap, Facebook, Instagram, Twitter, Linkedin, Cloud, MessageSquare, LogIn, X, Clock, Image as ImageIcon, Upload, Menu, Phone, CheckCircle, AlertTriangle, ArrowLeft, ArrowRight, ThumbsUp, MessageSquare as CommentIcon, Share2, TrendingUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown, Bell, MoreVertical, Trash2, Sparkles, Eye, FileText, Save, History, CheckCircle2, Info, Hash, LogOut, Download, RefreshCw, Plus, Check } from 'lucide-react';
+import BillingContent from './components/BillingContent';
+import Billing from './components/Billing';
+import AdBanner from './components/AdBanner';
+import { Sun, Moon, LayoutDashboard, Send, BarChart2, Settings, Zap, Facebook, Instagram, Twitter, Linkedin, Cloud, MessageSquare, LogIn, X, Clock, Image as ImageIcon, Upload, Menu, Phone, CheckCircle, AlertTriangle, ArrowLeft, ArrowRight, ThumbsUp, MessageSquare as CommentIcon, Share2, TrendingUp, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronDown, Bell, MoreVertical, Trash2, Sparkles, Eye, FileText, Save, History, CheckCircle2, Info, Hash, LogOut, Download, RefreshCw, Plus, Check, User, CreditCard, Lock } from 'lucide-react';
+
 
 // --- API INTEGRATION LAYER ---
 import {
@@ -55,7 +61,7 @@ const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial
 const PLATFORMS = [
     { id: 'facebook', name: 'Facebook', icon: Facebook, color: 'bg-blue-600', hover: 'hover:bg-blue-700', description: 'Schedule posts and track page performance.' },
     { id: 'instagram', name: 'Instagram', icon: Instagram, color: 'bg-pink-600', hover: 'hover:bg-pink-700', description: 'Publish Reels, Stories, and carousel posts.' },
-    // REMOVED: { id: 'twitter', name: 'Twitter (X)', icon: Twitter, color: 'bg-sky-500', hover: 'hover:bg-sky-600', description: 'Monitor engagement and publish tweets.' },
+    { id: 'twitter', name: 'Twitter (X)', icon: Twitter, color: 'bg-sky-500', hover: 'hover:bg-sky-600', description: 'Monitor engagement and publish tweets.' },
     { id: 'linkedin', name: 'LinkedIn', icon: Linkedin, color: 'bg-sky-700', hover: 'hover:bg-sky-800', description: 'Manage company pages and professional profiles.' },
     { id: 'whatsapp', name: 'WhatsApp', icon: MessageSquare, color: 'bg-green-600', hover: 'hover:bg-green-700', description: 'Manage customer communications via WhatsApp API.' },
     { id: 'onedrive', name: 'OneDrive', icon: Cloud, color: 'bg-blue-500', hover: 'hover:bg-blue-600', description: 'Access media files directly from cloud storage.' },
@@ -1984,7 +1990,7 @@ const LoginModal = ({ isOpen, onClose }) => {
 
 
 // --- SideBar Component ---
-const Sidebar = ({ isDarkMode, handleNavClick, isSidebarOpen, toggleSidebar, view, user }) => {
+const Sidebar = ({ isDarkMode, handleNavClick, isSidebarOpen, toggleSidebar, view, user, userPlan }) => {
     // Determine the color of "Connect" based on dark mode state
     const connectColorClass = isDarkMode ? 'text-gray-100' : 'text-blue-600';
 
@@ -2011,6 +2017,7 @@ const Sidebar = ({ isDarkMode, handleNavClick, isSidebarOpen, toggleSidebar, vie
         { name: 'Analytics', icon: BarChart2, path: 'analytics' },
         { name: 'Integrations', icon: Zap, path: 'integrations_page' },
         { name: 'Trending', icon: TrendingUp, path: 'trending_panel' }, // NEW TRENDING PATH
+        { name: 'Billing', icon: CreditCard, path: 'billing' },
         { name: 'Settings', icon: Settings, path: 'settings' },
     ];
 
@@ -2051,6 +2058,7 @@ const Sidebar = ({ isDarkMode, handleNavClick, isSidebarOpen, toggleSidebar, vie
                         <img
                             src={user.photoURL}
                             alt="Profile"
+                            referrerPolicy="no-referrer"
                             className={`rounded-full border-2 border-blue-500 shadow ${isSidebarOpen ? 'w-14 h-14' : 'w-8 h-8'}`}
                         />
                     ) : (
@@ -2105,7 +2113,16 @@ const Sidebar = ({ isDarkMode, handleNavClick, isSidebarOpen, toggleSidebar, vie
             </nav>
 
             {/* User ID Footer (Collapsed/Expanded) */}
-            <div className={`mt-auto pt-4 border-t border-gray-200 dark:border-gray-800 ${isSidebarOpen ? 'text-left px-4' : 'text-center'}`}>
+            <div className={`mt-auto overflow-hidden ${isSidebarOpen ? 'px-4' : 'px-2'}`}>
+                {/* Ad Banner for Basic Users */}
+                {userPlan === 'basic' && (
+                    <div className="mb-4">
+                        <AdBanner userPlan={userPlan} isSidebar={true} isCollapsed={!isSidebarOpen} />
+                    </div>
+                )}
+            </div>
+
+            <div className={`pt-4 border-t border-gray-200 dark:border-gray-800 ${isSidebarOpen ? 'text-left px-4' : 'text-center'}`}>
                 {isSidebarOpen && (
                     <p className="text-xs text-gray-400 dark:text-gray-500 break-all">App ID: {appId}</p>
                 )}
@@ -2118,7 +2135,7 @@ const Sidebar = ({ isDarkMode, handleNavClick, isSidebarOpen, toggleSidebar, vie
 };
 
 // --- TopBar Component ---
-const TopBar = ({ toggleTheme, isDarkMode, user, openComposer, openLoginModal, handleLogout, notifications = [], onClearNotification, isNotificationPanelOpen, toggleNotificationPanel, isProfileDropdownOpen, toggleProfileDropdown, onNavigateToProfile }) => {
+const TopBar = ({ toggleTheme, isDarkMode, user, openComposer, openLoginModal, handleLogout, notifications = [], onClearNotification, isNotificationPanelOpen, toggleNotificationPanel, isProfileDropdownOpen, toggleProfileDropdown, onNavigateToProfile, userPlan }) => {
     // Check if user is logged in with a real account (not anonymous)
     const isRealUser = user && !user.isAnonymous && (user.email || user.displayName);
     const unreadCount = notifications.filter(n => !n.read).length;
@@ -2141,6 +2158,16 @@ const TopBar = ({ toggleTheme, isDarkMode, user, openComposer, openLoginModal, h
 
             {/* Action Items */}
             <div className="flex items-center space-x-3 ml-4">
+                {/* Ad for Basic Plan in Top Bar */}
+                {userPlan === 'basic' && (
+                    <button
+                        onClick={() => openComposer()} // Or navigate to billing
+                        className="hidden md:flex items-center gap-2 px-3 py-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 text-white rounded-full text-xs font-bold shadow-md hover:scale-105 transition-transform"
+                    >
+                        <Zap size={12} fill="currentColor" />
+                        <span>Upgrade</span>
+                    </button>
+                )}
                 <button
                     onClick={openComposer}
                     className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg shadow-md hover:bg-blue-700 transition-colors text-sm font-semibold"
@@ -2220,6 +2247,7 @@ const TopBar = ({ toggleTheme, isDarkMode, user, openComposer, openLoginModal, h
                                 <img
                                     src={user.photoURL}
                                     alt="User avatar"
+                                    referrerPolicy="no-referrer"
                                     className="w-8 h-8 rounded-full border-2 border-blue-500"
                                 />
                             ) : (
@@ -2244,6 +2272,7 @@ const TopBar = ({ toggleTheme, isDarkMode, user, openComposer, openLoginModal, h
                                             <img
                                                 src={user.photoURL}
                                                 alt="User avatar"
+                                                referrerPolicy="no-referrer"
                                                 className="w-12 h-12 rounded-full border-2 border-white/50"
                                             />
                                         ) : (
@@ -2683,8 +2712,16 @@ const TrendingSidebarContent = ({ openTrendingModal, onManageInterests, trending
 );
 
 
-const DashboardContent = ({ scheduledPosts, integrationsRef, isTargetingIntegrations, openTrendingModal, platformConnections, handleNavClick, hasInterests, db, userId, onDeleteFromPlatform, onDeleteSinglePlatform, deleting, onNavigateToCalendar, highlightedDate, onDeleteScheduledPost, onCancelAllScheduledPosts, trendingTopics, loadingTrending, trendingError, onRefreshTrending }) => (
+const DashboardContent = ({ scheduledPosts, integrationsRef, isTargetingIntegrations, openTrendingModal, platformConnections, handleNavClick, hasInterests, db, userId, onDeleteFromPlatform, onDeleteSinglePlatform, deleting, onNavigateToCalendar, highlightedDate, onDeleteScheduledPost, onCancelAllScheduledPosts, trendingTopics, loadingTrending, trendingError, onRefreshTrending, userPlan }) => (
+
     <div className="p-6 space-y-6">
+        {/* Ad Banner for Basic Plan */}
+        {userPlan === 'basic' && (
+            <div className="mb-6">
+                <AdBanner userPlan={userPlan} />
+            </div>
+        )}
+
         {/* Section 1: Platforms */}
         <div>
             <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-4">
@@ -2730,6 +2767,8 @@ const DashboardContent = ({ scheduledPosts, integrationsRef, isTargetingIntegrat
                 </button>
             </div>
         </div>
+
+
 
         {/* Section 2: Trending Content (Limited view with Explore more) */}
         <TrendingContent
@@ -2946,6 +2985,142 @@ const TrendingDetailModal = ({ isOpen, onClose, topic, onDraft, onUpdateImage })
 };
 
 
+// --- Onboarding Modal Component ---
+const OnboardingModal = ({ isOpen, userId, db, onComplete }) => {
+    const [formData, setFormData] = useState({
+        username: '',
+        gender: '',
+        dateOfBirth: ''
+    });
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState(null);
+
+    // Load initial data (e.g. from Auth provider)
+    useEffect(() => {
+        if (isOpen && userId && db) {
+            // Optional: Fetch existing incomplete data if needed
+            // For now, we assume if it's open, we need fresh input or just use what we have locally if we were lifting state
+        }
+    }, [isOpen, userId, db]);
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setError(null);
+
+        if (!formData.username.trim() || !formData.gender || !formData.dateOfBirth) {
+            setError('Please fill in all fields to continue.');
+            return;
+        }
+
+        setLoading(true);
+        try {
+            // using top-level imports
+            const userRef = doc(db, 'users', userId);
+
+            await setDoc(userRef, {
+                username: formData.username,
+                gender: formData.gender,
+                dateOfBirth: formData.dateOfBirth,
+                onboardingCompleted: true,
+                updatedAt: serverTimestamp()
+            }, { merge: true });
+
+            onComplete();
+        } catch (err) {
+            console.error("Error saving profile:", err);
+            setError("Failed to save details. Please try again.");
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    if (!isOpen) return null;
+
+    return (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-gray-900/80 backdrop-blur-sm p-4 animate-fade-in">
+            <div className="bg-white dark:bg-gray-800 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden border border-gray-100 dark:border-gray-700">
+                <div className="p-8">
+                    <div className="text-center mb-8">
+                        <div className="mx-auto w-16 h-16 bg-blue-100 dark:bg-blue-900/50 rounded-full flex items-center justify-center mb-4">
+                            <User size={32} className="text-blue-600 dark:text-blue-400" />
+                        </div>
+                        <h2 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-2">Welcome!</h2>
+                        <p className="text-gray-500 dark:text-gray-400">
+                            Let's set up your profile to personalize your experience.
+                        </p>
+                    </div>
+
+                    <form onSubmit={handleSubmit} className="space-y-5">
+                        {error && (
+                            <div className="p-3 bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-sm rounded-lg flex items-center">
+                                <AlertTriangle size={16} className="mr-2 flex-shrink-0" />
+                                {error}
+                            </div>
+                        )}
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Username / Display Name</label>
+                            <input
+                                type="text"
+                                value={formData.username}
+                                onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                                className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 transition-all outline-none"
+                                placeholder="How should we call you?"
+                            />
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Gender</label>
+                            <div className="grid grid-cols-3 gap-3">
+                                {['Male', 'Female', 'Other'].map((option) => (
+                                    <button
+                                        key={option}
+                                        type="button"
+                                        onClick={() => setFormData({ ...formData, gender: option.toLowerCase() })}
+                                        className={`py-2.5 px-2 rounded-lg text-sm font-medium border transition-all ${formData.gender === option.toLowerCase()
+                                            ? 'bg-blue-600 text-white border-blue-600 shadow-md'
+                                            : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'
+                                            }`}
+                                    >
+                                        {option}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">Date of Birth</label>
+                            <input
+                                type="date"
+                                value={formData.dateOfBirth}
+                                onChange={(e) => setFormData({ ...formData, dateOfBirth: e.target.value })}
+                                className="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 transition-all outline-none"
+                            />
+                        </div>
+
+                        <button
+                            type="submit"
+                            disabled={loading}
+                            className={`w-full py-3.5 rounded-xl text-white font-bold text-lg shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-0.5 ${loading ? 'bg-blue-400 cursor-not-allowed' : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700'
+                                }`}
+                        >
+                            {loading ? (
+                                <span className="flex items-center justify-center gap-2">
+                                    <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                                    Saving...
+                                </span>
+                            ) : (
+                                "Get Started →"
+                            )}
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+
 // --- Full-Screen Integration View Component ---
 
 const AuthFields = ({ platformId, loading, mobileNumber, setMobileNumber, otpInput, setOtpInput, handleSendOTP, handleVerifyOTP, handleLogin }) => {
@@ -2960,44 +3135,27 @@ const AuthFields = ({ platformId, loading, mobileNumber, setMobileNumber, otpInp
     const [otpFlow, setOtpFlow] = useState('phone_input'); // Re-initiate OTP flow state here for this component
 
     // --- Standard Login Fields (Email/Password or UserID/Password) ---
+    // MODIFIED: For OAuth platforms, we don't need user input.
     if (isEmailPassword || isUserIdPassword) {
-        const primaryLabel = isEmailPassword ? 'Email Address' : 'User ID';
-        const primaryType = isEmailPassword ? 'email' : 'text';
-
         return (
             <div className="w-full">
-                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                    {isEmailPassword ? 'Sign in using your account email and password.' : 'Sign in using your user ID and password.'}
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
+                    Connect your account securely via OAuth. You will be redirected to the provider's login page.
                 </p>
-                <div className="space-y-4">
-                    <div>
-                        <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">{primaryLabel}</label>
-                        <input
-                            type={primaryType}
-                            value={emailOrUser}
-                            onChange={(e) => setEmailOrUser(e.target.value)}
-                            className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-                            placeholder={`Enter ${primaryLabel}`}
-                        />
-                    </div>
-                    <div>
-                        <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Password</label>
-                        <input
-                            type="password"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-gray-100"
-                            placeholder="Enter Password"
-                        />
-                    </div>
-                </div>
                 <button
                     onClick={() => handleLogin(platformId)}
                     disabled={loading}
-                    className={`w-full mt-6 py-3 rounded-lg text-lg font-semibold text-white transition-colors ${loading ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
+                    className={`w-full py-3 rounded-lg text-lg font-semibold text-white transition-colors flex items-center justify-center gap-2 ${loading ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
                         }`}
                 >
-                    {loading ? 'Redirecting...' : `Connect with ${isEmailPassword ? 'OAuth' : 'OAuth'}`}
+                    {loading ? (
+                        <>
+                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                            Redirecting...
+                        </>
+                    ) : (
+                        `Connect with ${PLATFORMS.find(p => p.id === platformId)?.name || 'Account'}`
+                    )}
                 </button>
             </div>
         );
@@ -3724,6 +3882,28 @@ const SettingsContent = ({ db, userId, user }) => {
                             </div>
 
                             {/* Fields */}
+                            {/* Profile Photo Display */}
+                            <div className="mb-6 flex items-center gap-4">
+                                <div className="relative">
+                                    {user?.photoURL ? (
+                                        <img
+                                            src={user.photoURL}
+                                            alt="Profile"
+                                            referrerPolicy="no-referrer"
+                                            className="w-16 h-16 rounded-full border-2 border-gray-200 dark:border-gray-700 shadow-sm object-cover"
+                                        />
+                                    ) : (
+                                        <div className="w-16 h-16 rounded-full bg-blue-100 dark:bg-blue-900/50 flex items-center justify-center text-blue-600 dark:text-blue-400 font-bold text-2xl border-2 border-gray-200 dark:border-gray-700">
+                                            {(profileData.username || user?.displayName || user?.email || 'U').charAt(0).toUpperCase()}
+                                        </div>
+                                    )}
+                                </div>
+                                <div>
+                                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100">Profile Photo</p>
+                                    <p className="text-xs text-gray-500 dark:text-gray-400">Synced from your login account</p>
+                                </div>
+                            </div>
+
                             <div className="space-y-4">
                                 <div>
                                     <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Username</label>
@@ -3944,7 +4124,7 @@ const AnalyticsContent = () => (
 
 
 // --- Composer 2.0 Full-Page View ---
-const ComposerContent = ({ db, userId, platformConnections, addToast, addNotification, onUnsavedContentChange, saveDraftRef, initialData, onClearInitialData }) => {
+const ComposerContent = ({ db, userId, platformConnections, addToast, addNotification, onUnsavedContentChange, saveDraftRef, initialData, onClearInitialData, userPlan, monthlyPostCount, scheduledPostsCount, updateUserUsage }) => {
     // Post content state - PER PLATFORM
     const [platformDrafts, setPlatformDrafts] = useState({});     // { linkedin: "...", twitter: "..." }
     const [platformTones, setPlatformTones] = useState({});        // { linkedin: "professional", ... }
@@ -3952,6 +4132,7 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
     const [toneDropdownOpen, setToneDropdownOpen] = useState(false);
     const [showPlatformDropdown, setShowPlatformDropdown] = useState(false); // For adding platforms
     const [isRefining, setIsRefining] = useState(false);
+
     const [selectedPlatforms, setSelectedPlatforms] = useState([]);
 
     // Platform tone defaults & tone options
@@ -3987,6 +4168,7 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
     const imageLoadedRef = useRef(false);
     const lastImageUrlRef = useRef(null);
 
+<<<<<<< HEAD
     // Trending topic context for Compose with AI flow
     const trendingTopicRef = useRef(null);
     const [pendingPlatformSelection, setPendingPlatformSelection] = useState([]);
@@ -4056,6 +4238,14 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
                     setPlatformDrafts(drafts);
                 }
             }
+=======
+    const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+
+    // Load initial data if provided (e.g. from Trending Topics)
+    useEffect(() => {
+        if (initialData) {
+            if (initialData.platforms) setSelectedPlatforms(initialData.platforms);
+>>>>>>> rutesh-pr
 
             if (initialData.platforms) {
                 setSelectedPlatforms(initialData.platforms);
@@ -4105,7 +4295,15 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
     // Loading/status state
     const [loading, setLoading] = useState(false);
     const [statusMessage, setStatusMessage] = useState(null);
+<<<<<<< HEAD
     const [regenCooldown, setRegenCooldown] = useState(0);
+=======
+    const [isAiRefining, setIsAiRefining] = useState(false);
+    const [selectedTone, setSelectedTone] = useState('Professional');
+    const TONES = ['Professional', 'Casual', 'Funny', 'Excited', 'Witty', 'Sarcastic', 'Dramatic', 'Grumpy'];
+    const BASIC_TONES = ['Professional', 'Casual', 'Excited'];
+    const [regenCooldown, setRegenCooldown] = useState(0); // Cooldown for regenerate button
+>>>>>>> rutesh-pr
 
     // Auto-dismiss status messages after 3 seconds
     useEffect(() => {
@@ -4241,6 +4439,63 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
             setImageBase64(reader.result.split(',')[1]);
         };
         reader.readAsDataURL(file);
+    };
+
+    const handleRefineContent = async () => {
+        if (!content.trim()) return;
+
+        if (!userId) {
+            addToast('Please log in to use AI refinement.', 'error');
+            return;
+        }
+
+        // Basic Plan Restriction: Word Limit for AI
+        if (userPlan === 'basic') {
+            const wordCount = content.trim().split(/\s+/).length;
+            if (wordCount > 100) {
+                setStatusMessage({ type: 'error', text: 'Basic plan limit: Please reduce content to under 100 words for AI refinement.' });
+                return;
+            }
+        }
+        // Pro Plan Restriction: Word Limit for AI
+        if (userPlan === 'pro') {
+            const wordCount = content.trim().split(/\s+/).length;
+            if (wordCount > 1000) {
+                setStatusMessage({ type: 'error', text: 'Pro plan limit: Please reduce content to under 1000 words for AI refinement.' });
+                return;
+            }
+        }
+
+        // Basic Plan Restriction: Tones
+        // Uses component-level BASIC_TONES constant
+        if (userPlan === 'basic' && selectedTone && !BASIC_TONES.includes(selectedTone)) {
+            setStatusMessage({ type: 'error', text: `Basic plan is limited to ${BASIC_TONES.join(', ')} tones. Upgrade to Pro.` });
+            return;
+        }
+
+        setIsAiRefining(true);
+        console.log(`🤖 Refining content for user ${userId} with tone ${selectedTone}`);
+
+        try {
+            const result = await aiService.refineContent(content, userId, selectedTone);
+
+            if (result.success && result.refined_content) {
+                setContent(result.refined_content);
+                addToast('Content refined by AI successfully!', 'success');
+
+                // Show suggestions if available (optional enhancement)
+                if (result.suggestions && result.suggestions.length > 0) {
+                    console.log('AI Suggestions:', result.suggestions);
+                }
+            } else {
+                throw new Error(result.error || 'Failed to refine content');
+            }
+        } catch (error) {
+            console.error('Refinement failed:', error);
+            addToast(`Refinement failed: ${error.message}`, 'error');
+        } finally {
+            setIsAiRefining(false);
+        }
     };
 
     const removeImage = () => {
@@ -4590,6 +4845,17 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
             return;
         }
 
+        // Basic Plan Restriction: Monthly Post Limit
+        if (userPlan === 'basic' && monthlyPostCount >= 14) {
+            setStatusMessage({ type: 'error', text: 'Free trial for this month is completed. Plan will be renewed from next month on 1st.' });
+            return;
+        }
+        // Pro Plan Restriction: Monthly Post Limit
+        if (userPlan === 'pro' && monthlyPostCount >= 35) {
+            setStatusMessage({ type: 'error', text: 'Pro plan limit reached (35 posts/month). Upgrade to Enterprise.' });
+            return;
+        }
+
         setLoading(true);
         setStatusMessage({ type: 'info', text: '⏳ Posting...' });
 
@@ -4626,9 +4892,9 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
                 // Add other platforms as needed
             }
 
-            // Save to Firestore so it appears in calendar
+            // Save to Firestore (posts collection for immediate posts)
             if (db && userId) {
-                const path = `users/${userId}/scheduled_posts`;
+                const path = `users/${userId}/posts`;
                 const docRef = doc(collection(db, path));
 
                 await setDoc(docRef, {
@@ -4637,12 +4903,18 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
                     platforms: selectedPlatforms,
                     image: imageBase64 ? `data:${imageMimeType};base64,${imageBase64}` : null,
                     scheduledTime: new Date(),
+
                     status: 'posted',
                     platformPostIds: platformPostIds,
                     createdAt: serverTimestamp(),
                     postedAt: serverTimestamp(),
                 });
-                console.log('✅ [COMPOSER] Saved to Firestore for calendar');
+                console.log('✅ [COMPOSER] Saved to Firestore posts collection');
+            }
+
+            // Update Usage Stats
+            if (updateUserUsage) {
+                updateUserUsage('post');
             }
 
             setStatusMessage({ type: 'success', text: '✅ Posted successfully! Check your calendar.' });
@@ -4681,6 +4953,17 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
             return;
         }
 
+        // Basic Plan Restriction: Scheduled Post Limit
+        if (userPlan === 'basic' && scheduledPostsCount >= 2) {
+            setStatusMessage({ type: 'error', text: 'Basic plan limit reached (2 scheduled posts). Upgrade to Pro.' });
+            return;
+        }
+        // Pro Plan Restriction: Scheduled Post Limit
+        if (userPlan === 'pro' && scheduledPostsCount >= 15) {
+            setStatusMessage({ type: 'error', text: 'Pro plan limit reached (15 scheduled posts). Upgrade to Enterprise.' });
+            return;
+        }
+
         setLoading(true);
         try {
             const path = `users/${userId}/scheduled_posts`;
@@ -4697,6 +4980,11 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
                 status: 'pending',
                 createdAt: serverTimestamp(),
             });
+
+            // Update Usage Stats
+            if (updateUserUsage) {
+                updateUserUsage('schedule');
+            }
 
             setStatusMessage({ type: 'success', text: '📅 Post scheduled!' });
             addNotification?.({ type: 'scheduled', message: `Post scheduled for ${scheduledTime.toLocaleString()}` });
@@ -5162,56 +5450,59 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
                                     </div>
 
                                     {/* Toolbar (Tone) */}
-                                    {activePlatform && (
-                                        <div className="flex items-center justify-between px-4 py-2 bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700">
-                                            <div className="flex items-center gap-2">
-                                                <div className="relative">
-                                                    <button
-                                                        onClick={() => setToneDropdownOpen(!toneDropdownOpen)}
-                                                        className="flex items-center gap-1.5 px-2 py-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-200 transition-colors"
-                                                    >
-                                                        <span className="text-gray-400 dark:text-gray-500 font-normal">Tone:</span>
-                                                        {TONE_OPTIONS.find(t => t.value === (platformTones[activePlatform] || PLATFORM_DEFAULT_TONES[activePlatform]))?.label || 'Select'}
-                                                        <ChevronDown size={14} className="text-gray-400" />
-                                                    </button>
-                                                    {toneDropdownOpen && (
-                                                        <>
-                                                            <div className="fixed inset-0 z-10" onClick={() => setToneDropdownOpen(false)}></div>
-                                                            <div className="absolute top-full left-0 mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-xl z-20 min-w-[180px]">
-                                                                {TONE_OPTIONS.map(tone => (
-                                                                    <button
-                                                                        key={tone.value}
-                                                                        onClick={() => {
-                                                                            setPlatformTones(prev => ({ ...prev, [activePlatform]: tone.value }));
-                                                                            setToneDropdownOpen(false);
-                                                                        }}
-                                                                        className={`w-full text-left px-4 py-2 text-sm hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors first:rounded-t-lg last:rounded-b-lg ${(platformTones[activePlatform] || PLATFORM_DEFAULT_TONES[activePlatform]) === tone.value
-                                                                            ? 'bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 font-medium'
-                                                                            : 'text-gray-700 dark:text-gray-300'
-                                                                            }`}
-                                                                    >
-                                                                        {tone.label}
-                                                                    </button>
-                                                                ))}
-                                                            </div>
-                                                        </>
-                                                    )}
+                                    {
+                                        activePlatform && (
+                                            <div className="flex items-center justify-between px-4 py-2 bg-white dark:bg-gray-800 border-b border-gray-100 dark:border-gray-700">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="relative">
+                                                        <button
+                                                            onClick={() => setToneDropdownOpen(!toneDropdownOpen)}
+                                                            className="flex items-center gap-1.5 px-2 py-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg text-sm font-medium text-gray-700 dark:text-gray-200 transition-colors"
+                                                        >
+                                                            <span className="text-gray-400 dark:text-gray-500 font-normal">Tone:</span>
+                                                            {TONE_OPTIONS.find(t => t.value === (platformTones[activePlatform] || PLATFORM_DEFAULT_TONES[activePlatform]))?.label || 'Select'}
+                                                            <ChevronDown size={14} className="text-gray-400" />
+                                                        </button>
+                                                        {toneDropdownOpen && (
+                                                            <>
+                                                                <div className="fixed inset-0 z-10" onClick={() => setToneDropdownOpen(false)}></div>
+                                                                <div className="absolute top-full left-0 mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg shadow-xl z-20 min-w-[180px]">
+                                                                    {TONE_OPTIONS.map(tone => (
+                                                                        <button
+                                                                            key={tone.value}
+                                                                            onClick={() => {
+                                                                                setPlatformTones(prev => ({ ...prev, [activePlatform]: tone.value }));
+                                                                                setToneDropdownOpen(false);
+                                                                            }}
+                                                                            className={`w-full text-left px-4 py-2 text-sm hover:bg-purple-50 dark:hover:bg-purple-900/20 transition-colors first:rounded-t-lg last:rounded-b-lg ${(platformTones[activePlatform] || PLATFORM_DEFAULT_TONES[activePlatform]) === tone.value
+                                                                                ? 'bg-purple-50 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 font-medium'
+                                                                                : 'text-gray-700 dark:text-gray-300'
+                                                                                }`}
+                                                                        >
+                                                                            {tone.label}
+                                                                        </button>
+                                                                    ))}
+                                                                </div>
+                                                            </>
+                                                        )}
+                                                    </div>
                                                 </div>
-                                            </div>
 
-                                            <button
-                                                onClick={handleRefineTone}
-                                                disabled={isRefining || !platformDrafts[activePlatform]?.trim()}
-                                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${isRefining || !platformDrafts[activePlatform]?.trim()
-                                                    ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
-                                                    : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300'
-                                                    }`}
-                                            >
-                                                {isRefining ? <RefreshCw size={12} className="animate-spin" /> : <Sparkles size={12} />}
-                                                Refine with AI
-                                            </button>
-                                        </div>
-                                    )}
+
+                                                <button
+                                                    onClick={handleRefineTone}
+                                                    disabled={isRefining || !platformDrafts[activePlatform]?.trim()}
+                                                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all ${isRefining || !platformDrafts[activePlatform]?.trim()
+                                                        ? 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
+                                                        : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-300'
+                                                        }`}
+                                                >
+                                                    {isRefining ? <RefreshCw size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                                                    Refine with AI
+                                                </button>
+                                            </div>
+                                        )
+                                    }
 
                                     {/* Content Area */}
                                     <div className="p-4 bg-white dark:bg-gray-800 flex gap-4 rounded-b-xl">
@@ -5352,230 +5643,235 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
                                     </div>
 
 
-                                </div>
-                            </div>
+                                </div >
+                            </div >
 
 
                             {/* Sticky Footer: Schedule Section */}
-                            <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
-                                {showScheduler ? (
-                                    <div className="flex items-center gap-3 flex-wrap">
-                                        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Schedule for:</span>
-                                        <input
-                                            type="date"
-                                            value={scheduleDate}
-                                            onChange={(e) => setScheduleDate(e.target.value)}
-                                            min={new Date().toISOString().split('T')[0]}
-                                            className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm"
-                                        />
-                                        <input
-                                            type="time"
-                                            value={scheduleTime}
-                                            onChange={(e) => setScheduleTime(e.target.value)}
-                                            className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm"
-                                        />
-                                        <button
-                                            onClick={handleSchedule}
-                                            disabled={loading || !content.trim() || selectedPlatforms.length === 0 || !scheduleDate || !scheduleTime}
-                                            className="px-4 py-2 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2 text-sm"
-                                        >
-                                            {loading ? <Clock className="animate-spin" size={16} /> : <Clock size={16} />}
-                                            Schedule
-                                        </button>
-                                        <button
-                                            onClick={() => setShowScheduler(false)}
-                                            className="p-2 text-gray-500 hover:text-gray-700"
-                                        >
-                                            <X size={16} />
-                                        </button>
-                                    </div>
-                                ) : (
-                                    <div className="flex items-center justify-between">
-                                        <button
-                                            onClick={() => setShowScheduler(true)}
-                                            className="flex items-center gap-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-sm"
-                                        >
-                                            <Clock size={16} />
-                                            Schedule
-                                        </button>
-
-                                        {/* Save Draft Icon */}
-                                        <button
-                                            onClick={saveDraft}
-                                            disabled={!hasUnsavedContent()}
-                                            title="Save Draft"
-                                            className={`p-2 rounded-lg border transition-all ${hasUnsavedContent()
-                                                ? 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:border-green-400 hover:text-green-600'
-                                                : 'bg-gray-50 dark:bg-gray-800 text-gray-400 border-gray-200 dark:border-gray-700 cursor-not-allowed opacity-50'
-                                                }`}
-                                        >
-                                            <Save size={18} />
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
-                        </div>
-
-                        {/* Right: AI Chat Panel (inline, not overlay) */}
-                        {showAiChat && (
-                            <div className="w-1/2 flex flex-col border-l border-gray-200 dark:border-gray-700">
-                                <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-                                    <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
-                                        <MessageSquare className="h-5 w-5 text-purple-500" /> AI Assistant
-                                    </h2>
-                                    <button
-                                        onClick={() => setShowAiChat(false)}
-                                        className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
-                                    >
-                                        <X size={20} className="text-gray-500" />
-                                    </button>
-                                </div>
-                                <p className="px-4 py-2 text-xs text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
-                                    Ask me to write, refine, or improve your post
-                                </p>
-
-                                {/* Chat Messages */}
-                                <div className="flex-1 overflow-y-auto p-4 space-y-4">
-                                    {chatMessages.map((msg, idx) => (
-                                        <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                                            <div className={`max-w-[85%] px-4 py-3 rounded-2xl ${msg.role === 'user'
-                                                ? 'bg-blue-600 text-white rounded-br-sm'
-                                                : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100 rounded-bl-sm'
-                                                }`}>
-                                                <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
-
-                                                {/* Interactive platform selection (Compose with AI flow) */}
-                                                {msg.type === 'platform_select' && msg.connectedPlatforms && (
-                                                    <div className="mt-3 pt-3 border-t border-gray-300/50 dark:border-gray-600/50">
-                                                        <div className="space-y-2 mb-3">
-                                                            {msg.connectedPlatforms.map(pId => {
-                                                                const platform = PLATFORMS.find(p => p.id === pId);
-                                                                if (!platform) return null;
-                                                                const isChecked = pendingPlatformSelection.includes(pId);
-                                                                return (
-                                                                    <label
-                                                                        key={pId}
-                                                                        className={`flex items-center gap-3 p-2.5 rounded-lg cursor-pointer transition-all ${isChecked
-                                                                            ? 'bg-blue-50 dark:bg-blue-900/30 ring-1 ring-blue-400'
-                                                                            : 'hover:bg-gray-200/50 dark:hover:bg-gray-600/50'
-                                                                            }`}
-                                                                    >
-                                                                        <input
-                                                                            type="checkbox"
-                                                                            checked={isChecked}
-                                                                            onChange={() => {
-                                                                                setPendingPlatformSelection(prev =>
-                                                                                    prev.includes(pId)
-                                                                                        ? prev.filter(x => x !== pId)
-                                                                                        : [...prev, pId]
-                                                                                );
-                                                                            }}
-                                                                            className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
-                                                                        />
-                                                                        <platform.icon size={18} className={platform.color.replace('bg-', 'text-')} />
-                                                                        <span className="text-sm font-medium">{platform.name}</span>
-                                                                    </label>
-                                                                );
-                                                            })}
-                                                        </div>
-                                                        {pendingPlatformSelection.length > 0 && (
-                                                            <button
-                                                                onClick={() => handleComposeFromTrending(pendingPlatformSelection)}
-                                                                disabled={isAiTyping}
-                                                                className="w-full py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm font-semibold rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
-                                                            >
-                                                                <Sparkles size={16} />
-                                                                Continue →
-                                                            </button>
-                                                        )}
-                                                        {pendingPlatformSelection.length === 0 && (
-                                                            <p className="text-xs text-gray-500 dark:text-gray-400 text-center">Select at least one platform to continue</p>
-                                                        )}
-                                                    </div>
-                                                )}
-
-                                                {msg.suggestedContent && (
-                                                    <div className="mt-2 pt-2 border-t border-white/20 text-xs opacity-80">
-                                                        ✅ Applied to preview
-                                                    </div>
-                                                )}
-                                            </div>
+                            < div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800" >
+                                {
+                                    showScheduler ? (
+                                        <div className="flex items-center gap-3 flex-wrap" >
+                                            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Schedule for:</span>
+                                            <input
+                                                type="date"
+                                                value={scheduleDate}
+                                                onChange={(e) => setScheduleDate(e.target.value)}
+                                                min={new Date().toISOString().split('T')[0]}
+                                                className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm"
+                                            />
+                                            <input
+                                                type="time"
+                                                value={scheduleTime}
+                                                onChange={(e) => setScheduleTime(e.target.value)}
+                                                className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 text-sm"
+                                            />
+                                            <button
+                                                onClick={handleSchedule}
+                                                disabled={loading || !content.trim() || selectedPlatforms.length === 0 || !scheduleDate || !scheduleTime}
+                                                className="px-4 py-2 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2 text-sm"
+                                            >
+                                                {loading ? <Clock className="animate-spin" size={16} /> : <Clock size={16} />}
+                                                Schedule
+                                            </button>
+                                            <button
+                                                onClick={() => setShowScheduler(false)}
+                                                className="p-2 text-gray-500 hover:text-gray-700"
+                                            >
+                                                <X size={16} />
+                                            </button>
                                         </div>
-                                    ))}
-                                    {isAiTyping && (
-                                        <div className="flex justify-start">
-                                            <div className="bg-gray-100 dark:bg-gray-700 px-4 py-3 rounded-2xl rounded-bl-sm">
-                                                <div className="flex space-x-1">
-                                                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                                                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                                                    <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-                                                </div>
-                                            </div>
+                                    ) : (
+                                        <div className="flex items-center justify-between">
+                                            <button
+                                                onClick={() => setShowScheduler(true)}
+                                                className="flex items-center gap-2 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-sm"
+                                            >
+                                                <Clock size={16} />
+                                                Schedule
+                                            </button>
+
+                                            {/* Save Draft Icon */}
+                                            <button
+                                                onClick={saveDraft}
+                                                disabled={!hasUnsavedContent()}
+                                                title="Save Draft"
+                                                className={`p-2 rounded-lg border transition-all ${hasUnsavedContent()
+                                                    ? 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600 hover:border-green-400 hover:text-green-600'
+                                                    : 'bg-gray-50 dark:bg-gray-800 text-gray-400 border-gray-200 dark:border-gray-700 cursor-not-allowed opacity-50'
+                                                    }`}
+                                            >
+                                                <Save size={18} />
+                                            </button>
                                         </div>
                                     )}
-                                    <div ref={chatEndRef} />
-                                </div>
+                            </div >
+                        </div >
 
-                                {/* Quick Actions */}
-                                <div className="px-4 py-2 border-t border-gray-200 dark:border-gray-700">
-                                    <div className="flex gap-2 flex-wrap">
+                        {/* Right: AI Chat Panel (inline, not overlay) */}
+                        {
+                            showAiChat && (
+                                <div className="w-1/2 flex flex-col border-l border-gray-200 dark:border-gray-700">
+                                    <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
+                                        <h2 className="text-lg font-bold text-gray-800 dark:text-gray-100 flex items-center gap-2">
+                                            <MessageSquare className="h-5 w-5 text-purple-500" /> AI Assistant
+                                        </h2>
                                         <button
-                                            onClick={() => setChatInput('Write a professional LinkedIn post about ')}
-                                            className="text-xs px-3 py-1.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-full hover:bg-purple-200 dark:hover:bg-purple-900/50"
+                                            onClick={() => setShowAiChat(false)}
+                                            className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg"
                                         >
-                                            ✍️ Write about...
-                                        </button>
-                                        <button
-                                            onClick={() => setChatInput('Make my post more engaging and add emojis')}
-                                            className="text-xs px-3 py-1.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-full hover:bg-purple-200 dark:hover:bg-purple-900/50"
-                                        >
-                                            ✨ Engaging
-                                        </button>
-                                        <button
-                                            onClick={() => setChatInput('Shorten my post')}
-                                            className="text-xs px-3 py-1.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-full hover:bg-purple-200 dark:hover:bg-purple-900/50"
-                                        >
-                                            📏 Shorten
+                                            <X size={20} className="text-gray-500" />
                                         </button>
                                     </div>
-                                </div>
+                                    <p className="px-4 py-2 text-xs text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-gray-700">
+                                        Ask me to write, refine, or improve your post
+                                    </p>
 
-                                {/* Chat Input */}
-                                <div className="p-4 border-t border-gray-200 dark:border-gray-700">
-                                    <div className="flex gap-2">
-                                        <input
-                                            type="text"
-                                            value={chatInput}
-                                            onChange={(e) => setChatInput(e.target.value)}
-                                            onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSendChat()}
-                                            placeholder="Ask AI for help..."
-                                            className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-full bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                                        />
-                                        <button
-                                            onClick={handleSendChat}
-                                            disabled={isAiTyping || !chatInput.trim()}
-                                            className="p-2 bg-purple-600 text-white rounded-full hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                                        >
-                                            <Send size={18} />
-                                        </button>
+                                    {/* Chat Messages */}
+                                    <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                                        {chatMessages.map((msg, idx) => (
+                                            <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                                                <div className={`max-w-[85%] px-4 py-3 rounded-2xl ${msg.role === 'user'
+                                                    ? 'bg-blue-600 text-white rounded-br-sm'
+                                                    : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100 rounded-bl-sm'
+                                                    }`}>
+                                                    <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+
+                                                    {/* Interactive platform selection (Compose with AI flow) */}
+                                                    {msg.type === 'platform_select' && msg.connectedPlatforms && (
+                                                        <div className="mt-3 pt-3 border-t border-gray-300/50 dark:border-gray-600/50">
+                                                            <div className="space-y-2 mb-3">
+                                                                {msg.connectedPlatforms.map(pId => {
+                                                                    const platform = PLATFORMS.find(p => p.id === pId);
+                                                                    if (!platform) return null;
+                                                                    const isChecked = pendingPlatformSelection.includes(pId);
+                                                                    return (
+                                                                        <label
+                                                                            key={pId}
+                                                                            className={`flex items-center gap-3 p-2.5 rounded-lg cursor-pointer transition-all ${isChecked
+                                                                                ? 'bg-blue-50 dark:bg-blue-900/30 ring-1 ring-blue-400'
+                                                                                : 'hover:bg-gray-200/50 dark:hover:bg-gray-600/50'
+                                                                                }`}
+                                                                        >
+                                                                            <input
+                                                                                type="checkbox"
+                                                                                checked={isChecked}
+                                                                                onChange={() => {
+                                                                                    setPendingPlatformSelection(prev =>
+                                                                                        prev.includes(pId)
+                                                                                            ? prev.filter(x => x !== pId)
+                                                                                            : [...prev, pId]
+                                                                                    );
+                                                                                }}
+                                                                                className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                                                                            />
+                                                                            <platform.icon size={18} className={platform.color.replace('bg-', 'text-')} />
+                                                                            <span className="text-sm font-medium">{platform.name}</span>
+                                                                        </label>
+                                                                    );
+                                                                })}
+                                                            </div>
+                                                            {pendingPlatformSelection.length > 0 && (
+                                                                <button
+                                                                    onClick={() => handleComposeFromTrending(pendingPlatformSelection)}
+                                                                    disabled={isAiTyping}
+                                                                    className="w-full py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm font-semibold rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
+                                                                >
+                                                                    <Sparkles size={16} />
+                                                                    Continue →
+                                                                </button>
+                                                            )}
+                                                            {pendingPlatformSelection.length === 0 && (
+                                                                <p className="text-xs text-gray-500 dark:text-gray-400 text-center">Select at least one platform to continue</p>
+                                                            )}
+                                                        </div>
+                                                    )}
+
+                                                    {msg.suggestedContent && (
+                                                        <div className="mt-2 pt-2 border-t border-white/20 text-xs opacity-80">
+                                                            ✅ Applied to preview
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        ))}
+                                        {isAiTyping && (
+                                            <div className="flex justify-start">
+                                                <div className="bg-gray-100 dark:bg-gray-700 px-4 py-3 rounded-2xl rounded-bl-sm">
+                                                    <div className="flex space-x-1">
+                                                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                                                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                                                        <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
+                                        <div ref={chatEndRef} />
+                                    </div>
+
+                                    {/* Quick Actions */}
+                                    <div className="px-4 py-2 border-t border-gray-200 dark:border-gray-700">
+                                        <div className="flex gap-2 flex-wrap">
+                                            <button
+                                                onClick={() => setChatInput('Write a professional LinkedIn post about ')}
+                                                className="text-xs px-3 py-1.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-full hover:bg-purple-200 dark:hover:bg-purple-900/50"
+                                            >
+                                                ✍️ Write about...
+                                            </button>
+                                            <button
+                                                onClick={() => setChatInput('Make my post more engaging and add emojis')}
+                                                className="text-xs px-3 py-1.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-full hover:bg-purple-200 dark:hover:bg-purple-900/50"
+                                            >
+                                                ✨ Engaging
+                                            </button>
+                                            <button
+                                                onClick={() => setChatInput('Shorten my post')}
+                                                className="text-xs px-3 py-1.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-full hover:bg-purple-200 dark:hover:bg-purple-900/50"
+                                            >
+                                                📏 Shorten
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    {/* Chat Input */}
+                                    <div className="p-4 border-t border-gray-200 dark:border-gray-700">
+                                        <div className="flex gap-2">
+                                            <input
+                                                type="text"
+                                                value={chatInput}
+                                                onChange={(e) => setChatInput(e.target.value)}
+                                                onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSendChat()}
+                                                placeholder="Ask AI for help..."
+                                                className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-full bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                                            />
+                                            <button
+                                                onClick={handleSendChat}
+                                                disabled={isAiTyping || !chatInput.trim()}
+                                                className="p-2 bg-purple-600 text-white rounded-full hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                                            >
+                                                <Send size={18} />
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
-                        )}
-                    </div>
+                            )
+                        }
+                    </div >
                 )}
 
                 {/* Floating AI Toggle Button - Always show when AI chat is closed */}
-                {!showAiChat && (
-                    <button
-                        onClick={() => setShowAiChat(true)}
-                        className="fixed bottom-20 right-6 p-4 rounded-full shadow-2xl transition-all z-50 bg-gradient-to-r from-purple-500 to-blue-500 text-white hover:scale-110"
-                        title="Open AI Assistant"
-                    >
-                        <MessageSquare size={24} />
-                    </button>
-                )}
-            </div>
+                {
+                    !showAiChat && (
+                        <button
+                            onClick={() => setShowAiChat(true)}
+                            className="fixed bottom-20 right-6 p-4 rounded-full shadow-2xl transition-all z-50 bg-gradient-to-r from-purple-500 to-blue-500 text-white hover:scale-110"
+                            title="Open AI Assistant"
+                        >
+                            <MessageSquare size={24} />
+                        </button>
+                    )
+                }
+            </div >
         </div >
     );
 };
@@ -5603,6 +5899,44 @@ const App = () => {
     // --- NEW ONBOARDING STATE ---
     const [interestsCompleted, setInterestsCompleted] = useState(null); // null, true, or false
     const [userTypeCompleted, setUserTypeCompleted] = useState(null); // null = loading, true = done, false = needs selection
+
+    // --- BILLING STATE ---
+    const [userPlan, setUserPlan] = useState('basic'); // default to basic
+    const [monthlyPostCount, setMonthlyPostCount] = useState(0);
+    const [scheduledPostsCount, setScheduledPostsCount] = useState(0);
+
+    useEffect(() => {
+        if (!db || !userId) return;
+
+        // Fetch user plan and usage from Firestore
+        const usageDocRef = doc(db, `users/${userId}/preferences/usage`);
+        const unsubUsage = onSnapshot(usageDocRef, (docSnap) => {
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                setMonthlyPostCount(data.monthlyPostCount || 0);
+                setScheduledPostsCount(data.scheduledPostsCount || 0);
+                // Plan could be stored here or in the main user doc. Assuming default 'basic' for now.
+                // If plan is stored in user doc, we'd fetch it there.
+            } else {
+                // Initialize usage doc if not exists
+                setDoc(usageDocRef, { monthlyPostCount: 0, scheduledPostsCount: 0 }, { merge: true });
+            }
+        });
+
+        return () => unsubUsage();
+    }, [db, userId]);
+
+    const updateUserUsage = useCallback((type) => {
+        if (!db || !userId) return;
+        const usageDocRef = doc(db, `users/${userId}/preferences/usage`);
+        // const { increment } = require('firebase/firestore'); // Removed require
+
+        if (type === 'post') {
+            setDoc(usageDocRef, { monthlyPostCount: increment(1) }, { merge: true });
+        } else if (type === 'schedule') {
+            setDoc(usageDocRef, { scheduledPostsCount: increment(1) }, { merge: true });
+        }
+    }, [db, userId]);
 
     // --- TRENDING TOPICS STATE ---
     const [trendingTopics, setTrendingTopics] = useState([]);
@@ -5745,6 +6079,46 @@ const App = () => {
             return !prev;
         });
     }, []);
+
+    // --- ONBOARDING LOGIC ---
+    const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
+    const [hasCheckedOnboarding, setHasCheckedOnboarding] = useState(false);
+
+    useEffect(() => {
+        if (!user || !db || !userId) return;
+
+        // Don't check again if we've already determined the status for this session/user match
+        // But we need to listen for real-time updates in case they update settings elsewhere
+
+        // Using top-level imports for doc and onSnapshot
+
+        const unsub = onSnapshot(doc(db, 'users', userId), (docSnap) => {
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                // Check if critical fields are missing
+                const isProfileComplete =
+                    data.username &&
+                    data.gender &&
+                    data.dateOfBirth;
+
+                // Also check a specific flag if we want to be explicit
+                // But user asked for "if fields are there" logic implied.
+
+                if (!isProfileComplete && !data.onboardingCompleted) {
+                    setIsOnboardingOpen(true);
+                } else {
+                    setIsOnboardingOpen(false);
+                }
+            } else {
+                // User doc doesn't exist yet - trigger onboarding
+                setIsOnboardingOpen(true);
+            }
+            setHasCheckedOnboarding(true);
+        });
+
+        return () => unsub();
+    }, [user, db, userId]);
+    // --- END ONBOARDING LOGIC ---
 
 
     // Delete from platform state and handler
@@ -5938,8 +6312,8 @@ const App = () => {
 
         window.addEventListener('popstate', handlePopState);
 
-        // Set initial state so first back works
-        window.history.replaceState({ view: 'dashboard' }, '', window.location.hash || '#dashboard');
+        // Ensure URLs always match the current view (force Dashboard on reload regardless of hash)
+        window.history.replaceState({ view }, '', `#${view}`);
 
         return () => window.removeEventListener('popstate', handlePopState);
     }, [view, composerHasUnsavedContent]);
@@ -6260,6 +6634,7 @@ const App = () => {
                     loadingTrending={loadingTrending}
                     trendingError={trendingError}
                     onRefreshTrending={() => loadTrendingTopics(true)}
+                    userPlan={userPlan}
                 />;
             case 'analytics':
                 return <AnalyticsPage />;
@@ -6282,6 +6657,8 @@ const App = () => {
                 />;
             case 'settings':
                 return <SettingsContent db={db} userId={userId} user={user} />;
+            case 'billing':
+                return <Billing userPlan={userPlan} monthlyPostCount={monthlyPostCount} scheduledPostsCount={scheduledPostsCount} />;
             case 'composer':
                 return <ComposerContent
                     db={db}
@@ -6293,6 +6670,10 @@ const App = () => {
                     saveDraftRef={composerSaveDraftRef}
                     initialData={pendingDraft}
                     onClearInitialData={() => setPendingDraft(null)}
+                    userPlan={userPlan}
+                    monthlyPostCount={monthlyPostCount}
+                    scheduledPostsCount={scheduledPostsCount}
+                    updateUserUsage={updateUserUsage}
                 />;
             default:
                 // Defaulting to DashboardContent
@@ -6371,6 +6752,7 @@ const App = () => {
                         toggleSidebar={toggleSidebar}
                         view={view}
                         user={user}
+                        userPlan={userPlan}
                     />
                     <main ref={mainContentRef} className="flex-1 flex flex-col overflow-y-auto">
                         <TopBar
@@ -6386,7 +6768,9 @@ const App = () => {
                             toggleNotificationPanel={toggleNotificationPanel}
                             isProfileDropdownOpen={isProfileDropdownOpen}
                             toggleProfileDropdown={toggleProfileDropdown}
+                            toggleProfileDropdown={toggleProfileDropdown}
                             onNavigateToProfile={() => handleNavClick('settings')}
+                            userPlan={userPlan}
                         />
                         {renderContent()}
                     </main>
@@ -6460,41 +6844,52 @@ const App = () => {
             )}
 
             {/* No Platform Connected Popup */}
-            {showNoPlatformPopup && (
-                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-                    <div className={`rounded-xl shadow-2xl max-w-md w-full p-6 relative ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}>
-                        {/* Red X Close Button */}
-                        <button
-                            onClick={() => setShowNoPlatformPopup(false)}
-                            className="absolute top-2 right-2 p-2 rounded-lg bg-red-500 hover:bg-red-600 text-white transition-colors cursor-pointer shadow-md z-50"
-                            title="Close"
-                        >
-                            <X size={20} strokeWidth={3} />
-                        </button>
-                        <div className="flex items-center gap-3 mb-3">
-                            <div className="p-2 bg-amber-100 dark:bg-amber-900/30 rounded-full">
-                                <Zap size={24} className="text-amber-600 dark:text-amber-400" />
-                            </div>
-                            <h3 className={`text-lg font-bold pr-10 ${isDarkMode ? 'text-gray-100' : 'text-gray-900'}`}>Connect a Platform First</h3>
-                        </div>
-                        <p className={`mb-6 ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                            You need to connect at least <strong>1 platform</strong> (LinkedIn, Twitter, etc.) before you can compose posts with AI.
-                        </p>
-                        <div className="flex gap-3 justify-end">
+            {
+                showNoPlatformPopup && (
+                    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+                        <div className={`rounded-xl shadow-2xl max-w-md w-full p-6 relative ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}>
+                            {/* Red X Close Button */}
                             <button
-                                onClick={() => {
-                                    setShowNoPlatformPopup(false);
-                                    setIsTrendingModalOpen(false);
-                                    handleNavClick('integrations_page');
-                                }}
-                                className="px-5 py-2.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors font-semibold flex items-center gap-2"
+                                onClick={() => setShowNoPlatformPopup(false)}
+                                className="absolute top-2 right-2 p-2 rounded-lg bg-red-500 hover:bg-red-600 text-white transition-colors cursor-pointer shadow-md z-50"
+                                title="Close"
                             >
-                                Connect Now →
+                                <X size={20} strokeWidth={3} />
                             </button>
+                            <div className="flex items-center gap-3 mb-3">
+                                <div className="p-2 bg-amber-100 dark:bg-amber-900/30 rounded-full">
+                                    <Zap size={24} className="text-amber-600 dark:text-amber-400" />
+                                </div>
+                                <h3 className={`text-lg font-bold pr-10 ${isDarkMode ? 'text-gray-100' : 'text-gray-900'}`}>Connect a Platform First</h3>
+                            </div>
+                            <p className={`mb-6 ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                                You need to connect at least <strong>1 platform</strong> (LinkedIn, Twitter, etc.) before you can compose posts with AI.
+                            </p>
+                            <div className="flex gap-3 justify-end">
+                                <button
+                                    onClick={() => {
+                                        setShowNoPlatformPopup(false);
+                                        setIsTrendingModalOpen(false);
+                                        handleNavClick('integrations_page');
+                                    }}
+                                    className="px-5 py-2.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors font-semibold flex items-center gap-2"
+                                >
+                                    Connect Now →
+                                </button>
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            }
+
+            {/* Onboarding Modal */}
+            <OnboardingModal
+                isOpen={isOnboardingOpen}
+                userId={userId}
+                db={db}
+                onComplete={() => setIsOnboardingOpen(false)}
+            />
+
         </>
     );
 };

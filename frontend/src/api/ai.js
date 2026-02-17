@@ -1,5 +1,3 @@
-import axios from 'axios';
-
 const AGENT_SERVICE_URL = 'http://localhost:8006';
 
 export const aiService = {
@@ -14,16 +12,27 @@ export const aiService = {
      */
     refineContent: async (content, userId, tone, platform = null, instructions = null) => {
         try {
-            const response = await axios.post(`${AGENT_SERVICE_URL}/agent/content/refine`, {
-                user_id: userId,
-                original_content: content.trim(),
-                tone: tone.toLowerCase(), // Backend expects lowercase
-                platform: platform,
-                refinement_instructions: instructions,
-                generate_alternatives: false
+            const response = await fetch(`${AGENT_SERVICE_URL}/agent/content/refine`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    user_id: userId,
+                    original_content: content.trim(),
+                    tone: tone.toLowerCase(), // Backend expects lowercase
+                    platform: platform,
+                    refinement_instructions: instructions,
+                    generate_alternatives: false
+                })
             });
 
-            return response.data;
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
+            }
+
+            return await response.json();
         } catch (error) {
             console.error('AI Refinement Error:', error);
             throw error;

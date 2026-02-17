@@ -4168,10 +4168,12 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
     const imageLoadedRef = useRef(false);
     const lastImageUrlRef = useRef(null);
 
-<<<<<<< HEAD
     // Trending topic context for Compose with AI flow
     const trendingTopicRef = useRef(null);
     const [pendingPlatformSelection, setPendingPlatformSelection] = useState([]);
+
+    // Upgrade Modal State (from PR)
+    const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
     // Load initial data if provided (e.g. from Trending Topics or Drafts)
     useEffect(() => {
@@ -4238,45 +4240,17 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
                     setPlatformDrafts(drafts);
                 }
             }
-=======
-    const [showUpgradeModal, setShowUpgradeModal] = useState(false);
-
-    // Load initial data if provided (e.g. from Trending Topics)
-    useEffect(() => {
-        if (initialData) {
-            if (initialData.platforms) setSelectedPlatforms(initialData.platforms);
->>>>>>> rutesh-pr
 
             if (initialData.platforms) {
                 setSelectedPlatforms(initialData.platforms);
                 setActivePlatform(initialData.platforms[0] || null);
-                // Initialize tones
+                // Initialize tones (merged logic)
                 const tones = {};
                 initialData.platforms.forEach(p => {
                     tones[p] = (initialData.platformTones && initialData.platformTones[p]) || PLATFORM_DEFAULT_TONES[p] || 'neutral';
                 });
                 setPlatformTones(prev => ({ ...prev, ...tones }));
             }
-
-            // Load AI Image
-            if (initialData.imageUrl && initialData.imageUrl !== lastImageUrlRef.current) {
-                lastImageUrlRef.current = initialData.imageUrl;
-                const proxyUrl = `http://localhost:8006/proxy-image?url=${encodeURIComponent(initialData.imageUrl)}`;
-                fetch(proxyUrl)
-                    .then(res => { if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`); return res.blob(); })
-                    .then(blob => {
-                        if (blob.size < 100) throw new Error("Image blob too small");
-                        const objectUrl = URL.createObjectURL(blob);
-                        setUploadedImage(objectUrl);
-                        setImageMimeType("image/jpeg");
-                        const reader = new FileReader();
-                        reader.onloadend = () => { setImageBase64(reader.result); imageLoadedRef.current = true; addToast("AI Image loaded", "success"); };
-                        reader.readAsDataURL(blob);
-                    })
-                    .catch(err => { addToast(`Failed to load image: ${err.message}`, "error"); });
-            }
-
-            if (onClearInitialData) setTimeout(onClearInitialData, 50);
         }
     }, [initialData]);
 
@@ -4295,15 +4269,13 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
     // Loading/status state
     const [loading, setLoading] = useState(false);
     const [statusMessage, setStatusMessage] = useState(null);
-<<<<<<< HEAD
-    const [regenCooldown, setRegenCooldown] = useState(0);
-=======
+
+    // Merged Conflict 2: Tone & Refine State
     const [isAiRefining, setIsAiRefining] = useState(false);
     const [selectedTone, setSelectedTone] = useState('Professional');
     const TONES = ['Professional', 'Casual', 'Funny', 'Excited', 'Witty', 'Sarcastic', 'Dramatic', 'Grumpy'];
     const BASIC_TONES = ['Professional', 'Casual', 'Excited'];
-    const [regenCooldown, setRegenCooldown] = useState(0); // Cooldown for regenerate button
->>>>>>> rutesh-pr
+    const [regenCooldown, setRegenCooldown] = useState(0);
 
     // Auto-dismiss status messages after 3 seconds
     useEffect(() => {
@@ -6767,7 +6739,6 @@ const App = () => {
                             isNotificationPanelOpen={isNotificationPanelOpen}
                             toggleNotificationPanel={toggleNotificationPanel}
                             isProfileDropdownOpen={isProfileDropdownOpen}
-                            toggleProfileDropdown={toggleProfileDropdown}
                             toggleProfileDropdown={toggleProfileDropdown}
                             onNavigateToProfile={() => handleNavClick('settings')}
                             userPlan={userPlan}

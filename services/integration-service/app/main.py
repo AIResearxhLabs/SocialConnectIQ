@@ -1576,7 +1576,6 @@ async def facebook_callback(code: str, state: Optional[str] = None):
             return RedirectResponse(
                 url=f"http://localhost:3000/oauth-callback.html?status=error&platform=facebook&message=invalid_state"
             )
-<<<<<<< HEAD
         
         # 2. Route to Agent Service (which calls MCP Server)
         print(f"📡 [INTEGRATION-SERVICE] Routing callback to Agent Service...")
@@ -1585,26 +1584,33 @@ async def facebook_callback(code: str, state: Optional[str] = None):
         async with httpx.AsyncClient(timeout=30.0) as client:
             agent_response = await client.post(
                 f"{AGENT_SERVICE_URL}/agent/facebook/handle-callback",
-=======
-            response.raise_for_status()
-            token_data = response.json()
+                json={
+                    "code": code,
+                    "user_id": user_id
+                }
+            )
             
-            await save_user_tokens(user_id, 'facebook', token_data)
+            print(f"📥 [INTEGRATION-SERVICE] Agent Service Response Status: {agent_response.status_code}")
             
-            return RedirectResponse(url=f"http://localhost:3000/oauth-callback.html?status=success&platform=facebook")
+            if agent_response.status_code != 200:
+                print(f"❌ [INTEGRATION-SERVICE] Agent Service error: {agent_response.text}")
+                return RedirectResponse(
+                    url=f"http://localhost:3000/oauth-callback.html?status=error&platform=facebook&message=agent_error"
+                )
             
-    except Exception:
-        return RedirectResponse(url=f"http://localhost:3000/oauth-callback.html?status=error&platform=facebook")
+            # Success! Agent Service handled exchange + storage
+            return RedirectResponse(
+                url=f"http://localhost:3000/oauth-callback.html?status=success&platform=facebook"
+            )
 
-@app.get("/api/integrations/facebook/status")
-async def facebook_status(user_id: str = Header(..., alias="X-User-ID")):
-    """Check Facebook connection status"""
-    tokens = await get_user_tokens(user_id, 'facebook')
-    
-    if tokens and tokens.get('connected'):
-        return {"connected": True, "connected_at": tokens.get('connected_at')}
-    
-    return {"connected": False}
+    except Exception as e:
+        print(f"❌ [INTEGRATION-SERVICE] Unexpected error: {str(e)}")
+        import traceback
+        print(traceback.format_exc())
+        return RedirectResponse(
+            url=f"http://localhost:3000/oauth-callback.html?status=error&platform=facebook&message=unexpected_error"
+        )
+
 
 @app.post("/api/integrations/facebook/post")
 async def post_to_facebook(post_request: PostRequest):
@@ -1634,170 +1640,24 @@ async def post_to_facebook(post_request: PostRequest):
         try:
             response = await client.post(
                 f"{AGENT_SERVICE_URL}/agent/facebook/post",
->>>>>>> rutesh-pr
                 json={
-                    "code": code,
-                    "user_id": user_id
+                    "content": post_request.content,
+                    "access_token": tokens.get('access_token'),
+                    "user_id": post_request.user_id
                 }
             )
             
-            print(f"📥 [INTEGRATION-SERVICE] Agent Service Response Status: {agent_response.status_code}")
-            
-            if agent_response.status_code != 200:
-                print(f"❌ [INTEGRATION-SERVICE] Agent Service error: {agent_response.text}")
-                return RedirectResponse(
-                    url=f"http://localhost:3000/oauth-callback.html?status=error&platform=facebook&message=agent_error"
-                )
-            
-            agent_data = agent_response.json()
-            
-            if not agent_data.get("success"):
-                error = agent_data.get("error", "Unknown error")
-                print(f"❌ [INTEGRATION-SERVICE] Agent Service failed: {error}")
-                return RedirectResponse(
-                    url=f"http://localhost:3000/oauth-callback.html?status=error&platform=facebook&message=callback_failed"
-                )
-            
-            # 3. Extract token data from MCP response
-            result = agent_data.get("result", {})
-            access_token = result.get("access_token") or result.get("accessToken")
-            expires_in = result.get("expires_in") or result.get("expiresIn", 5184000)
-            
-            if not access_token:
-                print(f"❌ [INTEGRATION-SERVICE] No access token in MCP response")
-                print(f"   └─ Response: {result}")
-                return RedirectResponse(
-                    url=f"http://localhost:3000/oauth-callback.html?status=error&platform=facebook&message=no_token"
-                )
-            
-            print(f"✅ [INTEGRATION-SERVICE] User Access Token received from MCP Server via Agent Service")
-            print(f"   ├─ Access Token: {access_token[:20]}...")
-            print(f"   └─ Expires In: {expires_in} seconds")
-            
-            # 4. FACEBOOK-SPECIFIC: Exchange User Token for Page Access Token
-            print(f"📘 [INTEGRATION-SERVICE] Fetching Facebook Page Access Token...")
-            print(f"   └─ GET https://graph.facebook.com/v21.0/me/accounts")
-            
-            page_access_token = access_token  # Fallback to user token
-            page_id = ""
-            page_name = ""
-            
-            try:
-                pages_response = await client.get(
-                    f"https://graph.facebook.com/v21.0/me/accounts",
-                    params={"access_token": access_token}
-                )
+            if response.status_code == 401:
+                print(f"❌ [INTEGRATION-SERVICE] Facebook token expired")
+                raise HTTPException(status_code=401, detail="Facebook token expired.")
                 
-                if pages_response.status_code == 200:
-                    pages_data = pages_response.json()
-                    pages = pages_data.get("data", [])
-                    
-                    if pages:
-                        # Use the first page (user can have multiple pages)
-                        first_page = pages[0]
-                        page_access_token = first_page.get("access_token", access_token)
-                        page_id = first_page.get("id", "")
-                        page_name = first_page.get("name", "")
-                        
-                        print(f"✅ [INTEGRATION-SERVICE] Page Access Token obtained!")
-                        print(f"   ├─ Page ID: {page_id}")
-                        print(f"   ├─ Page Name: {page_name}")
-                        print(f"   ├─ Page Token: {page_access_token[:20]}...")
-                        print(f"   └─ Total Pages Found: {len(pages)}")
-                    else:
-                        print(f"⚠️  [INTEGRATION-SERVICE] No Facebook Pages found for this user")
-                        print(f"   └─ The user may need to create a Page first")
-                else:
-                    print(f"⚠️  [INTEGRATION-SERVICE] Could not fetch pages: {pages_response.status_code}")
-                    print(f"   └─ Response: {pages_response.text[:200]}")
-                    
-            except Exception as page_err:
-                print(f"⚠️  [INTEGRATION-SERVICE] Error fetching Page token: {str(page_err)}")
-                print(f"   └─ Will use User Access Token as fallback")
+            response.raise_for_status()
+            return response.json()
             
-            # 5. Prepare token data for Firestore
-            token_storage_data = {
-                "access_token": page_access_token,
-                "user_access_token": access_token,
-                "page_id": page_id,
-                "page_name": page_name,
-                "expires_at": datetime.utcnow().timestamp() + expires_in,
-            }
+        except httpx.HTTPStatusError as exc:
+            print(f"❌ [INTEGRATION-SERVICE] HTTP Error from Agent Service: {exc.response.status_code}")
+            raise HTTPException(status_code=exc.response.status_code, detail=exc.response.text)
             
-            # 6. Save to Firestore
-            print(f"💾 [INTEGRATION-SERVICE] Saving Facebook tokens to Firestore...")
-            print(f"   ├─ User ID: {user_id}")
-            print(f"   ├─ Platform: facebook")
-            print(f"   ├─ Page ID: {page_id}")
-            print(f"   └─ Page Name: {page_name}")
-            
-            if db is None:
-                print(f"❌ [INTEGRATION-SERVICE] CRITICAL: Firestore not initialized!")
-                return RedirectResponse(
-                    url=f"http://localhost:3000/oauth-callback.html?status=error&platform=facebook&message=firestore_not_configured"
-                )
-            
-            try:
-                save_result = await save_user_tokens(user_id, 'facebook', token_storage_data)
-                
-                if not save_result:
-                    print(f"❌ [INTEGRATION-SERVICE] Failed to save tokens to Firestore")
-                    return RedirectResponse(
-                        url=f"http://localhost:3000/oauth-callback.html?status=error&platform=facebook&message=save_failed"
-                    )
-                
-                print(f"✅ [INTEGRATION-SERVICE] Facebook tokens saved successfully to Firestore!")
-                
-                # Delete state token now that everything succeeded
-                if state and db is not None:
-                    try:
-                        print(f"🗑️  [INTEGRATION-SERVICE] Deleting used state token...")
-                        db.collection('oauth_states').document(state).delete()
-                        print(f"✅ [INTEGRATION-SERVICE] State deleted successfully")
-                    except Exception as e:
-                        print(f"⚠️  [INTEGRATION-SERVICE] Warning: Could not delete state: {str(e)}")
-                
-                # 7. Return success page (to oauth-callback.html in popup)
-                import time
-                cache_bust = int(time.time() * 1000)
-                redirect_url = f"http://localhost:3000/oauth-callback.html?status=success&platform=facebook&_t={cache_bust}"
-                print(f"🔙 [INTEGRATION-SERVICE] Redirecting to: {redirect_url}")
-                print("="*100 + "\n")
-                
-                return RedirectResponse(url=redirect_url)
-                
-            except HTTPException as save_error:
-                print(f"❌ [INTEGRATION-SERVICE] HTTPException saving tokens: {save_error.detail}")
-                return RedirectResponse(
-                    url=f"http://localhost:3000/oauth-callback.html?status=error&platform=facebook&message=firestore_error"
-                )
-            except Exception as save_error:
-                print(f"❌ [INTEGRATION-SERVICE] Exception saving tokens: {str(save_error)}")
-                import traceback
-                print(traceback.format_exc())
-                return RedirectResponse(
-                    url=f"http://localhost:3000/oauth-callback.html?status=error&platform=facebook&message=exception"
-                )
-            
-    except httpx.RequestError as e:
-        print(f"❌ [INTEGRATION-SERVICE] Connection error to Agent Service: {str(e)}")
-        return RedirectResponse(
-            url=f"http://localhost:3000/oauth-callback.html?status=error&platform=facebook&message=connection_error"
-        )
-    except Exception as e:
-        print(f"❌ [INTEGRATION-SERVICE] Unexpected error in Facebook callback:")
-        print(f"   ├─ Type: {type(e).__name__}")
-        print(f"   └─ Message: {str(e)}")
-        
-        import traceback
-        print(f"📋 [INTEGRATION-SERVICE] Full traceback:")
-        print(traceback.format_exc())
-        
-        redirect_url = f"http://localhost:3000/oauth-callback.html?status=error&platform=facebook&message=unexpected_error"
-        print(f"🔙 [INTEGRATION-SERVICE] Redirecting to: {redirect_url}")
-        print("="*100 + "\n")
-        
-        return RedirectResponse(url=redirect_url)
 
 @app.get("/api/integrations/facebook/status")
 async def facebook_status(user_id: str = Header(..., alias="X-User-ID")):

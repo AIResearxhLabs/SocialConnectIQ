@@ -239,7 +239,8 @@ async def lifespan(app: FastAPI):
         # Initialize Trending Topics agent
         trending_agent = TrendingTopicsAgent(
             openai_api_key=settings.openai.api_key,
-            model="gpt-4o" # High quality model requested by user
+            model="gpt-4o",
+            gnews_api_key=os.getenv("GNEWS_API_KEY", "")
         )
         logger.info("Trending Topics Agent initialized")
         
@@ -327,6 +328,7 @@ async def proxy_image(url: str):
 # Request/Response Models
 class GetAuthUrlRequest(BaseModel):
     user_id: str
+    callback_url: Optional[str] = None
 
 
 class GetAuthUrlResponse(BaseModel):
@@ -1063,6 +1065,7 @@ async def facebook_auth(
         result = await facebook_agent.execute({
             "user_id": request.user_id,
             "action": "get_auth_url",
+            "callback_url": request.callback_url,
             "correlation_id": correlation_id
         })
         
@@ -2233,7 +2236,199 @@ async def get_trending_topics(
         )
 
 
+
+# --- FAST RSS-ONLY TRENDING (no AI) ---
+
+@app.get("/trending/{user_id}/fast")
+async def get_trending_fast(
+    user_id: str,
+    shuffle: bool = False,
+    x_correlation_id: Optional[str] = Header(None, alias="X-Correlation-ID")
+):
+    """
+    Fast trending topics — RSS only, no AI processing.
+    Returns raw headlines + snippets + images in ~1-2 seconds.
+    """
+    correlation_id = x_correlation_id or generate_correlation_id()
+    
+    correlation_logger.info(
+        f"FAST trending request for user {user_id}",
+        correlation_id=correlation_id
+    )
+    
+    if not trending_agent:
+        return TrendingResponse(success=False, error="Trending agent not initialized")
+    
+    if not db:
+        return TrendingResponse(success=False, error="Database not initialized")
+    
+    try:
+        # Fetch user's interests from Firestore
+        onboarding_ref = db.document(f'users/{user_id}/preferences/onboarding')
+        onboarding_doc = onboarding_ref.get()
+        
+        interests = []
+        if onboarding_doc.exists:
+            data = onboarding_doc.to_dict()
+            if data.get('personalizationEnabled', False) or data.get('selectedInterests'):
+                interests = data.get('selectedInterests', [])
+        
+        if not interests:
+            return TrendingResponse(
+                success=False,
+                error="No interests configured. Please enable personalization in Settings and select your interests.",
+                topics=[]
+            )
+        
+        correlation_logger.info(
+            f"Found {len(interests)} interests for FAST fetch",
+            correlation_id=correlation_id,
+            additional_data={"interests": interests}
+        )
+        
+        # 15 topics max, 5 per interest — instant RSS load
+        items_per = 5
+        max_total = 15
+        
+        result = await trending_agent.fetch_news_fast(
+            interests=interests,
+            correlation_id=correlation_id,
+            items_per_interest=items_per,
+            max_total=max_total,
+            shuffle=shuffle
+        )
+        
+        if result.get("success"):
+            correlation_logger.success(
+                f"FAST fetch returned {len(result.get('topics', []))} topics",
+                correlation_id=correlation_id
+            )
+        
+        return TrendingResponse(
+            success=result.get("success", False),
+            topics=result.get("topics", []),
+            cached=result.get("cached", False),
+            error=result.get("error")
+        )
+        
+    except Exception as e:
+        correlation_logger.error(
+            f"Error in FAST trending fetch: {str(e)}",
+            correlation_id=correlation_id
+        )
+        return TrendingResponse(success=False, error=str(e))
+
+
+# --- ON-DEMAND AI DRAFTING FROM TRENDING TOPIC ---
+
+class DraftFromTopicRequest(BaseModel):
+    title: str
+    summary: str = ""
+    sourceUrl: str = ""
+    platforms: List[str] = ["linkedin", "twitter", "facebook"]
+
+@app.post("/trending/draft")
+async def draft_from_trending_topic(
+    request: DraftFromTopicRequest,
+    x_correlation_id: Optional[str] = Header(None, alias="X-Correlation-ID")
+):
+    """
+    On-demand AI drafting: takes a single trending topic and generates
+    platform-specific social media drafts using the content agent.
+    """
+    correlation_id = x_correlation_id or generate_correlation_id()
+    
+    correlation_logger.info(
+        f"AI draft request for topic: {request.title[:50]}...",
+        correlation_id=correlation_id,
+        additional_data={"platforms": request.platforms}
+    )
+    
+    if not content_agent:
+        return {"success": False, "error": "Content agent not initialized"}
+    
+    try:
+        from openai import AsyncOpenAI as _DraftOpenAI
+        import os
+        
+        _draft_client = _DraftOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        
+        # Platform-specific guidelines
+        platform_guidelines = {
+            "facebook": "Facebook post (max 300 chars). Conversational, use emojis, ask a question or add a call-to-action. 3-5 hashtags at the end.",
+            "twitter": "Twitter/X post (max 280 chars). Punchy, use 1-2 emojis, make it retweetable. 2-3 hashtags woven in.",
+            "linkedin": "LinkedIn post (max 700 chars). Professional but engaging, start with a hook, share insight/opinion, end with a question. 3-5 hashtags at the end.",
+            "instagram": "Instagram caption (max 500 chars). Visual storytelling, use emojis generously, conversational. 5-10 hashtags at the end.",
+        }
+        
+        # Build context from the topic
+        news_context = f"Headline: {request.title}"
+        if request.summary and request.summary.strip() and "trending" not in request.summary.lower()[:30]:
+            news_context += f"\nContext: {request.summary}"
+        if request.sourceUrl:
+            news_context += f"\nSource: {request.sourceUrl}"
+        
+        # Generate each platform's draft in parallel
+        import asyncio
+        
+        async def generate_single_draft(platform: str) -> tuple:
+            guidelines = platform_guidelines.get(platform, platform_guidelines["facebook"])
+            try:
+                response = await _draft_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                f"You write viral social media posts. Write a {guidelines}\n\n"
+                                "Rules:\n"
+                                "- Output ONLY the post text, nothing else\n"
+                                "- Do NOT prefix with 'Here is...' or any meta-text\n"
+                                "- Start with a strong hook (question, bold statement, or emoji)\n"
+                                "- Make it feel like a real person wrote it, not AI\n"
+                                "- Include relevant emojis naturally\n"
+                                "- End with hashtags on a new line"
+                            )
+                        },
+                        {
+                            "role": "user",
+                            "content": f"Write a {platform} post about this news:\n\n{news_context}"
+                        }
+                    ],
+                    temperature=0.8,
+                    max_tokens=500
+                )
+                draft = response.choices[0].message.content.strip()
+                return (platform, draft)
+            except Exception as e:
+                logger.error(f"Draft generation failed for {platform}: {e}")
+                return (platform, f"Could not generate draft for {platform}. Try using the AI chat to write one.")
+        
+        # Run all platforms in parallel
+        draft_tasks = [generate_single_draft(p) for p in request.platforms]
+        results = await asyncio.gather(*draft_tasks)
+        
+        drafts = {platform: draft for platform, draft in results}
+        
+        correlation_logger.success(
+            f"Generated drafts for {len(drafts)} platforms",
+            correlation_id=correlation_id
+        )
+        
+        return {
+            "success": True,
+            "drafts": drafts,
+            "originalTitle": request.title,
+            "sourceUrl": request.sourceUrl
+        }
+        
+    except Exception as e:
+        correlation_logger.error(f"Error drafting from topic: {str(e)}", correlation_id=correlation_id)
+        return {"success": False, "error": str(e)}
+
+
 @app.post("/trending/clear-cache")
+
 async def clear_trending_cache(
     x_correlation_id: Optional[str] = Header(None, alias="X-Correlation-ID")
 ):

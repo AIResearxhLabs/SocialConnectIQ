@@ -180,6 +180,10 @@ textarea:focus {
   }
 }
 
+.animate-fadeIn {
+  animation: fadeIn 0.25s ease-out;
+}
+
 /* Smooth page transitions */
 main>div {
   animation: fadeIn 0.25s ease-out;

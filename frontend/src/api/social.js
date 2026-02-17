@@ -215,17 +215,32 @@ export const getFacebookStatus = async () => {
 export const postToFacebook = async (content, imageData, imageMimeType) => {
     const { userId } = await getUserAuth();
     const headers = await createHeaders();
-    const url = buildBackendUrl('api/integrations/facebook/post');
 
-    const response = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
+    // Use different endpoint based on whether image is included
+    const hasImage = imageData && imageData.length > 0;
+    const endpoint = hasImage
+        ? 'api/integrations/facebook/post-with-image'
+        : 'api/integrations/facebook/post';
+    const url = buildBackendUrl(endpoint);
+
+    console.log(`📤 [FRONTEND] Posting to Facebook ${hasImage ? 'WITH IMAGE' : 'text only'}`);
+
+    const body = hasImage
+        ? {
             content,
             user_id: userId,
             image_data: imageData,
             image_mime_type: imageMimeType,
-        }),
+        }
+        : {
+            content,
+            user_id: userId,
+        };
+
+    const response = await fetch(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
     });
 
     if (!response.ok) {
@@ -778,6 +793,68 @@ export const fetchTrendingTopics = async (forceRefresh = false, count = 10) => {
             cached: false,
             error: `Connection error: ${error.message}`
         };
+    }
+};
+
+/**
+ * Fast trending topics — RSS only, no AI processing.
+ * Returns raw headlines + snippets + images in ~1-2 seconds.
+ */
+export const fetchTrendingTopicsFast = async (shuffle = false) => {
+    const correlationId = generateCorrelationId();
+
+    console.log(`⚡ [FRONTEND] FAST Trending Topics fetch${shuffle ? ' (shuffled)' : ''}`);
+
+    try {
+        const { userId } = await getUserAuth();
+        const headers = await createHeaders(correlationId);
+
+        const url = buildAgentUrl(`trending/${userId}/fast${shuffle ? '?shuffle=true' : ''}`);
+        const response = await fetch(url, { method: 'GET', headers });
+        const data = await response.json();
+
+        if (!response.ok) {
+            return { success: false, topics: [], error: data.error || 'Failed to fetch' };
+        }
+
+        console.log(`✅ [FRONTEND] FAST fetched: ${data.topics?.length || 0} topics`);
+        return { success: true, topics: data.topics || [], cached: false, error: null };
+    } catch (error) {
+        console.error('❌ [FRONTEND] FAST Trending exception:', error);
+        return { success: false, topics: [], error: `Connection error: ${error.message}` };
+    }
+};
+
+/**
+ * On-demand AI drafting from a trending topic.
+ * Takes a single topic and generates platform-specific drafts.
+ */
+export const draftFromTrending = async (title, summary = '', sourceUrl = '', platforms = ['linkedin', 'twitter', 'facebook']) => {
+    const correlationId = generateCorrelationId();
+
+    console.log(`✨ [FRONTEND] Drafting from trending: ${title.slice(0, 50)}...`);
+
+    try {
+        const headers = await createHeaders(correlationId);
+        const url = buildAgentUrl('trending/draft');
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ title, summary, sourceUrl, platforms })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+            return { success: false, error: data.error || 'Draft failed' };
+        }
+
+        console.log(`✅ [FRONTEND] Drafted for ${Object.keys(data.drafts).length} platforms`);
+        return { success: true, drafts: data.drafts, originalTitle: data.originalTitle };
+    } catch (error) {
+        console.error('❌ [FRONTEND] Draft exception:', error);
+        return { success: false, error: error.message };
     }
 };
 

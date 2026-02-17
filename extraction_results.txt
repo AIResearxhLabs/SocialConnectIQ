@@ -1,0 +1,41 @@
+Got 30 articles. Starting extraction...
+  FAIL: HTTP 403 | decode=11.7s http=0.2s | still_google=False | https://sports.ndtv.com/football/east-bengal-vs-northeast-united-fc-live-streami
+  IMG TXT | d=10.8s h=1.3s t=12.2s | html=124274 | google=False | ValleyNXT Ventures unveils debut fund to back early-stage st
+  FAIL: HTTP 403 | decode=12.0s http=0.3s | still_google=False | https://www.hindustantimes.com/entertainment/bollywood/raveena-tandon-said-sorry
+  IMG --- | d=11.8s h=0.8s t=12.6s | html=53803 | google=False | Karnataka-UK Innovation Bridge for Startups: Rediff Moneynew
+  --- TXT | d=11.9s h=0.9s t=12.8s | html=25373 | google=False | Indian Football League to begin on February 27
+    OG metas found: 0 — []
+  IMG TXT | d=12.2s h=0.5s t=12.8s | html=331257 | google=False | Eden Hazard: ‘I’m more of a taxi driver than a football play
+  IMG TXT | d=12.5s h=0.3s t=12.8s | html=330166 | google=False | Sri Lanka vs Australia, T20 World Cup LIVE Score: Marcus Sto
+  IMG TXT | d=12.6s h=0.2s t=12.9s | html=249772 | google=False | The new technology shaping the vehicles of tomorrow
+  IMG TXT | d=12.8s h=0.2s t=13.1s | html=174631 | google=False | Kozhikode to host Kerala Technology Expo in May - The Hindu
+  IMG TXT | d=13.0s h=0.1s t=13.1s | html=329554 | google=False | Emerald Fennell’s Wuthering Heights is big movie with a very
+  FAIL: HTTP 403 | decode=12.9s http=0.2s | still_google=False | https://www.hindustantimes.com/cricket/england-vs-italy-live-cricket-score-eng-v
+  IMG TXT | d=12.6s h=0.5s t=13.2s | html=275730 | google=False | Rashmika Mandanna OUT of Amit Sharma's next: Here's why? -Re
+  IMG TXT | d=12.5s h=0.6s t=13.2s | html=686583 | google=False | Latest OTT releases (February 16-22): 12 new movies and TV s
+  IMG TXT | d=13.0s h=0.2s t=13.2s | html=179711 | google=False | ‘Next phase of innovation must prioritise scale and deployme
+  --- --- | d=12.7s h=0.5s t=13.3s | html=77160 | google=False | Bill Gates discusses technology in governance and public hea
+    OG metas found: 0 — []
+  IMG --- | d=13.0s h=0.3s t=13.3s | html=7779 | google=False | Analytics India Magazine
+  IMG TXT | d=12.7s h=0.5s t=13.3s | html=93999 | google=False | 10 Best Movies Directed By Clint Eastwood, Ranked
+  IMG TXT | d=13.3s h=0.1s t=13.4s | html=343413 | google=False | Serie A: BBC Alba coverage invoking Gazzetta Football Italia
+  IMG TXT | d=12.7s h=0.5s t=13.4s | html=1214522 | google=False | England vs Italy Highlights, T20 World Cup 2026: England bea
+  FAIL: HTTP 403 | decode=13.0s http=0.5s | still_google=False | https://www.nytimes.com/2026/02/13/technology/meta-facial-recognition-smart-glas
+  IMG TXT | d=12.8s h=0.7s t=13.5s | html=283817 | google=False | Big Cricket League Season 2 Set for March in Greater Noida |
+  IMG TXT | d=13.0s h=0.5s t=13.7s | html=1009007 | google=False | England beat Italy by 24 runs: T20 World Cup cricket – as it
+  IMG TXT | d=12.7s h=0.9s t=13.7s | html=568242 | google=False | 'Pulp Fiction' Writer Says He Couldn't Sell Movies Until He 
+  FAIL: HTTP 403 | decode=13.3s http=0.5s | still_google=False | https://www.ndtv.com/entertainment/why-raveena-tandon-told-yami-gautam-sorry-aft
+  IMG TXT | d=13.1s h=0.7s t=13.8s | html=304152 | google=False | East Bengal vs NorthEast United FC HIGHLIGHTS, ISL 2025-26: 
+  IMG --- | d=12.6s h=1.1s t=14.3s | html=974092 | google=False | Berlinale Chief Tricia Tuttle on Championing Indie Movies Wh
+  IMG TXT | d=13.7s h=0.5s t=14.4s | html=515098 | google=False | Raveena Tandon Says ‘Sorry’ To Yami Gautam After Watching Dh
+  OUTER-TIMEOUT: https://news.google.com/rss/articles/CBMiygFBVV95cUxOME8zSm1
+  OUTER-TIMEOUT: https://news.google.com/rss/articles/CBMinwFBVV95cUxPdnQ0TG5
+  OUTER-TIMEOUT: https://news.google.com/rss/articles/CBMiqgFBVV95cUxNZEtMQUl
+
+============================================================
+RESULTS: 22 OK, 5 FAIL, 0 exceptions
+Images: 20/30
+Descriptions: 20/30
+Previews: 18/30
+Time: 15.0s
+============================================================

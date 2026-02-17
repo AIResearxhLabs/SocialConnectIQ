@@ -19,6 +19,7 @@ class FacebookAgentState(TypedDict):
     """State for Facebook OAuth workflow"""
     user_id: str
     action: str  # 'get_auth_url', 'handle_callback', 'post_content'
+    callback_url: str | None  # Custom callback URL for OAuth
     code: str | None  # OAuth authorization code
     content: str | None  # Content to post
     access_token: str | None  # Facebook user access token
@@ -143,7 +144,8 @@ class FacebookOAuthAgent:
             # Call MCP client with correlation_id
             result = await self.mcp_client.get_facebook_auth_url(
                 state["user_id"],
-                correlation_id
+                correlation_id,
+                state.get("callback_url")
             )
             
             state["auth_url"] = result.get("auth_url") or result.get("authUrl") or result.get("authorizationUrl")

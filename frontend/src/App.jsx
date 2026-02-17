@@ -33,10 +33,11 @@ import {
     disconnectTwitter,
     disconnectInstagram,
     disconnectWhatsApp,
-    disconnectWhatsApp,
     postToLinkedIn, // Ensure this is imported
     postToFacebook, // NEW: Import Facebook posting function
     fetchTrendingTopics,
+    fetchTrendingTopicsFast,
+    draftFromTrending,
     clearTrendingCache,
 } from './api/social';
 
@@ -102,9 +103,19 @@ const ToastNotification = ({ toasts, removeToast }) => {
 };
 
 // --- Post Detail Modal Component ---
-const PostDetailModal = ({ post, isOpen, onClose, onDelete, deleting }) => {
+const PostDetailModal = ({ post, isOpen, onClose, onDelete, onDeletePlatform, deleting }) => {
     const [showMenu, setShowMenu] = useState(false);
     const [confirmDelete, setConfirmDelete] = useState(false);
+    const [activeTab, setActiveTab] = useState(null);
+
+    // Set default active tab when post opens
+    useEffect(() => {
+        if (post && post.platforms && post.platforms.length > 0) {
+            setActiveTab(post.platforms[0]);
+        } else if (post) {
+            setActiveTab('default');
+        }
+    }, [post]);
 
     if (!isOpen || !post) return null;
 
@@ -118,134 +129,148 @@ const PostDetailModal = ({ post, isOpen, onClose, onDelete, deleting }) => {
     };
 
     const handleConfirmDelete = async () => {
-        await onDelete(post);
+        if (onDeletePlatform && activeTab && activeTab !== 'default') {
+            await onDeletePlatform(post, activeTab);
+        } else {
+            await onDelete(post);
+        }
         setConfirmDelete(false);
+        // We generally close, but if there are other platforms remaining, parent should handle update.
+        // For simplicity, we close for now as the parent usually refreshes state.
         onClose();
     };
 
+    const activePlatform = PLATFORMS.find(p => p.id === activeTab);
+    // Get content specific to the active platform (if tailored), else fallback to generic content
+    const displayContent = (activeTab && post.platformDrafts && post.platformDrafts[activeTab])
+        ? post.platformDrafts[activeTab]
+        : post.content;
+
+    // Determine status for this platform (if we track per-platform status in the future)
+    // Currently we only have global status, so we use that.
+    const displayStatus = post.status;
+
     return (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" onClick={onClose}>
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-lg w-full max-h-[80vh] overflow-hidden" onClick={e => e.stopPropagation()}>
-                {/* Header */}
-                <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-                    <div className="flex items-center gap-2">
-                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${post.status === 'posted' ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300' :
-                            post.status === 'pending' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300' :
-                                'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300'
-                            }`}>
-                            {post.status || 'pending'}
-                        </span>
-                        <span className="text-sm text-gray-500 dark:text-gray-400">
-                            {scheduledDate.toLocaleDateString()} at {scheduledDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        {/* Three-dot menu - only show for posted posts */}
-                        {post.status === 'posted' && (
-                            <div className="relative">
-                                <button
-                                    onClick={() => setShowMenu(!showMenu)}
-                                    className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                                >
-                                    <MoreVertical size={20} className="text-gray-500" />
-                                </button>
-                                {showMenu && (
-                                    <div className="absolute right-0 mt-1 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-10">
-                                        <button
-                                            onClick={handleDeleteClick}
-                                            className="w-full flex items-center gap-2 px-4 py-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 text-sm"
-                                        >
-                                            <Trash2 size={16} />
-                                            Delete from LinkedIn
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                        {/* For pending posts - show cancel option */}
-                        {post.status === 'pending' && (
-                            <div className="relative">
-                                <button
-                                    onClick={() => setShowMenu(!showMenu)}
-                                    className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
-                                >
-                                    <MoreVertical size={20} className="text-gray-500" />
-                                </button>
-                                {showMenu && (
-                                    <div className="absolute right-0 mt-1 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 z-10">
-                                        <button
-                                            onClick={handleDeleteClick}
-                                            className="w-full flex items-center gap-2 px-4 py-2 text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/30 text-sm"
-                                        >
-                                            <X size={16} />
-                                            Cancel Scheduled Post
-                                        </button>
-                                    </div>
-                                )}
-                            </div>
-                        )}
-                        <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
-                            <X size={20} className="text-gray-500" />
+            <div className="relative bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-lg w-full max-h-[80vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+
+                {/* Header with Tabs */}
+                <div className="flex flex-col border-b border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/50">
+                    <div className="flex items-center justify-between p-4 pb-2">
+                        <div className="flex items-center gap-2">
+                            <span className={`px-2 py-1 text-xs font-medium rounded-full ${displayStatus === 'posted' ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300' :
+                                displayStatus === 'pending' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300' :
+                                    'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300'
+                                }`}>
+                                {displayStatus || 'pending'}
+                            </span>
+                            <span className="text-sm text-gray-500 dark:text-gray-400">
+                                {scheduledDate.toLocaleDateString()} • {scheduledDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                        </div>
+                        <button onClick={onClose} className="p-2 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-full transition-colors text-gray-500">
+                            <X size={20} />
                         </button>
                     </div>
-                </div>
 
-                {/* Content */}
-                <div className="p-4">
-                    {/* Post content - TOP */}
-                    <p className="text-lg text-gray-800 dark:text-gray-100 whitespace-pre-wrap leading-relaxed mb-4">
-                        {post.content}
-                    </p>
-
-                    {/* Image preview - BOTTOM */}
-                    {post.image && (
-                        <div className="mb-4 rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700">
-                            <img src={post.image} alt="Post image" className="w-full max-h-[400px] object-cover" />
+                    {/* Tabs */}
+                    {post.platforms && post.platforms.length > 0 && (
+                        <div className="flex px-4 gap-2 overflow-x-auto no-scrollbar">
+                            {post.platforms.map(pId => {
+                                const p = PLATFORMS.find(pl => pl.id === pId);
+                                if (!p) return null;
+                                const Icon = p.icon;
+                                const isActive = activeTab === pId;
+                                return (
+                                    <button
+                                        key={pId}
+                                        onClick={() => setActiveTab(pId)}
+                                        className={`flex items-center gap-2 px-3 py-2 rounded-t-lg text-sm font-medium transition-colors border-b-2 ${isActive
+                                            ? `border-${p.color.split('-')[1]}-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100`
+                                            : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
+                                            }`}
+                                    >
+                                        <Icon size={16} className={isActive ? `text-${p.color.split('-')[1]}-500` : ''} />
+                                        {p.name}
+                                    </button>
+                                );
+                            })}
                         </div>
                     )}
+                </div>
 
-                    {/* Platforms */}
-                    <div className="mt-4 flex items-center gap-2">
-                        <span className="text-xs text-gray-500">Platforms:</span>
-                        {post.platforms?.map(pId => {
-                            const platform = PLATFORMS.find(p => p.id === pId);
-                            if (!platform) return null;
-                            const Icon = platform.icon;
-                            return <Icon key={pId} size={18} className={`text-white p-0.5 rounded ${platform.color}`} title={platform.name} />;
-                        })}
+                {/* Content Body */}
+                <div className="p-0 overflow-y-auto flex-1 bg-white dark:bg-gray-800">
+                    <div className="p-6">
+                        {/* Content Text */}
+                        <div className="mb-6">
+                            <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">
+                                {activePlatform ? `${activePlatform.name} Post Content` : 'Content'}
+                            </h4>
+                            <p className="text-base text-gray-800 dark:text-gray-100 whitespace-pre-wrap leading-relaxed">
+                                {displayContent}
+                            </p>
+                        </div>
+
+                        {/* Image Preview */}
+                        {post.image && (
+                            <div className="mb-6 rounded-xl overflow-hidden border border-gray-200 dark:border-gray-700 shadow-sm">
+                                <img src={post.image} alt="Post image" className="w-full max-h-[300px] object-cover" />
+                            </div>
+                        )}
+
+                        {/* Metadata / IDs */}
+                        {post.platformPostIds && post.platformPostIds[activeTab] && (
+                            <div className="mt-4 p-3 bg-gray-50 dark:bg-gray-900 rounded-lg text-xs font-mono text-gray-500 break-all">
+                                <span className="font-bold text-gray-400 select-none mr-2">REMOTE ID:</span>
+                                {post.platformPostIds[activeTab]}
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                {/* Footer / Actions */}
+                <div className="p-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/50 flex justify-between items-center">
+                    <div className="text-xs text-gray-400 italic">
+                        {post.platforms?.length > 1 ? 'Deleting removes only this platform.' : 'Deleting removes this post entirely.'}
                     </div>
 
-                    {/* Platform Post IDs (for debugging, can be hidden later) */}
-                    {post.platformPostIds && (
-                        <div className="mt-2 text-xs text-gray-400">
-                            LinkedIn ID: {post.platformPostIds.linkedin || 'N/A'}
-                        </div>
-                    )}
+                    {/* Delete Button */}
+                    <button
+                        onClick={() => setConfirmDelete(true)}
+                        className="flex items-center gap-2 px-4 py-2 text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg text-sm font-medium transition-colors"
+                    >
+                        <Trash2 size={16} />
+                        Delete from {activePlatform?.name || 'Platform'}
+                    </button>
                 </div>
 
-                {/* Delete Confirmation - Fixed overlay to ensure visibility */}
+                {/* Delete Confirmation Modal (Nested) */}
                 {confirmDelete && (
-                    <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
-                        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-sm w-full p-6">
-                            <p className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-2">
-                                Delete this post?
+                    <div className="absolute inset-0 bg-white/70 dark:bg-gray-900/70 z-[60] flex items-center justify-center p-6 backdrop-blur-[2px] transition-all">
+                        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl p-6 text-center max-w-xs animate-in fade-in zoom-in duration-200 border border-gray-100 dark:border-gray-700">
+                            <div className="w-12 h-12 bg-red-100 dark:bg-red-900/30 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <Trash2 size={24} />
+                            </div>
+                            <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-2">Delete from {activePlatform?.name}?</h3>
+                            <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+                                {post.platforms?.length > 1
+                                    ? `This will remove the post from ${activePlatform?.name} but keep others.`
+                                    : "This will permanently delete this post from your calendar."}
                             </p>
-                            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                                This will remove it from LinkedIn and your calendar. This cannot be undone.
-                            </p>
-                            <div className="flex gap-3 justify-end">
+                            <div className="flex gap-3 justify-center">
                                 <button
                                     onClick={() => setConfirmDelete(false)}
-                                    className="px-4 py-2 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors"
+                                    className="px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 font-medium transition-colors"
                                 >
                                     Cancel
                                 </button>
                                 <button
                                     onClick={handleConfirmDelete}
                                     disabled={deleting}
-                                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50"
+                                    className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 font-medium shadow-lg shadow-red-500/30 transition-colors"
                                 >
-                                    {deleting ? 'Deleting...' : 'Yes, Delete'}
+                                    {deleting ? 'Deleting...' : 'Confirm Delete'}
                                 </button>
                             </div>
                         </div>
@@ -339,16 +364,20 @@ const MOCK_TRENDING_CONTENT = [
     { id: 10, platformId: 'twitter', title: 'Cryptocurrency Crash Analysis', metrics: { likes: '12K', comments: 4.5, shares: '3.1K' }, imageUrl: 'https://picsum.photos/id/1050/300/200', summary: 'Detailed analysis of the market correction in Bitcoin and Ethereum. Is this a buying opportunity or the start of a bear market?' },
 ];
 
-const INTEREST_FIELDS = [
-    'Adventure', 'Animals', 'Art', 'Artificial Intelligence', 'Astrophysics',
-    'Automotive', 'Business', 'Comedy', 'Cooking', 'Crafts',
-    'Cryptocurrency', 'Culture', 'DIY/Home Improvement', 'Education', 'Environmental Science',
-    'Fashion', 'Finance', 'Fitness', 'Food & Drink', 'Gaming',
-    'Health', 'History', 'Home Design', 'Investing', 'Language Learning',
-    'Literature', 'Movies', 'Music', 'News', 'Photography',
-    'Podcasts', 'Science', 'Space Exploration', 'Sports', 'Startups',
-    'Technology', 'Travel', 'Video Games', 'Volunteering', 'Wellness'
-].sort();
+const INTEREST_CATEGORIES = {
+    'Sports': { icon: '⚽', subs: ['Cricket', 'Football', 'Tennis', 'Basketball', 'Formula 1', 'Badminton', 'Athletics'] },
+    'Technology': { icon: '💻', subs: ['Artificial Intelligence', 'Cybersecurity', 'Gadgets', 'Software', 'Cloud Computing', 'Blockchain'] },
+    'Entertainment': { icon: '🎬', subs: ['Movies', 'TV Shows', 'Bollywood', 'Hollywood', 'Anime', 'Web Series'] },
+    'Gaming': { icon: '🎮', subs: ['Video Games', 'Esports', 'Mobile Gaming', 'PC Gaming', 'Console Gaming'] },
+    'Music': { icon: '🎵', subs: ['Pop Music', 'Hip Hop', 'Bollywood Music', 'Classical', 'Rock', 'Electronic'] },
+    'Business & Finance': { icon: '💼', subs: ['Startups', 'Stock Market', 'Cryptocurrency', 'Investing', 'Economy', 'Entrepreneurship'] },
+    'Science': { icon: '🔬', subs: ['Space Exploration', 'Astrophysics', 'Environmental Science', 'Biology', 'Physics'] },
+    'Health & Wellness': { icon: '🏥', subs: ['Fitness', 'Nutrition', 'Mental Health', 'Yoga', 'Medical Research'] },
+    'Art & Culture': { icon: '🎨', subs: ['Photography', 'Literature', 'Fashion', 'History', 'Design', 'Architecture'] },
+    'Food & Travel': { icon: '✈️', subs: ['Cooking', 'Street Food', 'Travel Destinations', 'Food Reviews', 'Adventure Travel'] },
+    'Education': { icon: '📚', subs: ['Language Learning', 'Online Courses', 'Career Development', 'Study Tips', 'Scholarships'] },
+    'Lifestyle': { icon: '🏡', subs: ['DIY/Home Improvement', 'Home Design', 'Volunteering', 'Podcasts', 'Pets'] },
+};
 
 
 // --- Landing Page Component (for unauthenticated users) ---
@@ -656,7 +685,7 @@ const ThemeToggle = ({ isDarkMode, toggleTheme }) => {
 
 // --- Calendar Component ---
 
-const CalendarView = ({ scheduledPosts = [], onDeleteFromPlatform, deleting, highlightedDate }) => {
+const CalendarView = ({ scheduledPosts = [], onDeleteFromPlatform, onDeleteSinglePlatform, deleting, highlightedDate }) => {
     // Initialize state with current month and year
     const today = new Date();
     const [currentDate, setCurrentDate] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
@@ -953,6 +982,7 @@ const CalendarView = ({ scheduledPosts = [], onDeleteFromPlatform, deleting, hig
                 isOpen={!!selectedPost}
                 onClose={closeDetailModal}
                 onDelete={onDeleteFromPlatform}
+                onDeletePlatform={onDeleteSinglePlatform}
                 deleting={deleting}
             />
         </>
@@ -2284,6 +2314,7 @@ const InterestSelectionView = ({ onComplete, db, userId, isDarkMode }) => {
     const [selectedInterests, setSelectedInterests] = useState([]);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
+    const [expandedCategories, setExpandedCategories] = useState({});
 
     const MIN_SELECTION = 3;
 
@@ -2293,7 +2324,15 @@ const InterestSelectionView = ({ onComplete, db, userId, isDarkMode }) => {
                 ? prev.filter(i => i !== interest)
                 : [...prev, interest]
         );
-        setError(null); // Clear error on interaction
+        setError(null);
+    };
+
+    const toggleCategory = (cat) => {
+        setExpandedCategories(prev => ({ ...prev, [cat]: !prev[cat] }));
+    };
+
+    const getCategorySelectedCount = (cat) => {
+        return INTEREST_CATEGORIES[cat].subs.filter(s => selectedInterests.includes(s)).length;
     };
 
     const handleSubmit = async () => {
@@ -2335,41 +2374,57 @@ const InterestSelectionView = ({ onComplete, db, userId, isDarkMode }) => {
                     In which fields are you more interested in?
                 </label>
 
-                {/* Dynamic Interest List Container */}
+                {/* Categorized Interest Accordion */}
                 <div
-                    className="max-h-80 overflow-y-auto pr-4 border border-gray-300 dark:border-gray-600 rounded-lg p-4 space-y-3"
-                    aria-required="true"
-                    aria-describedby="error-message-interest"
+                    className="max-h-96 overflow-y-auto border border-gray-300 dark:border-gray-600 rounded-lg divide-y divide-gray-200 dark:divide-gray-700"
                     role="group"
+                    aria-describedby="error-message-interest"
                 >
-                    {INTEREST_FIELDS.map(field => {
-                        const isSelected = selectedInterests.includes(field);
+                    {Object.entries(INTEREST_CATEGORIES).map(([category, { icon, subs }]) => {
+                        const isExpanded = expandedCategories[category];
+                        const selectedCount = getCategorySelectedCount(category);
                         return (
-                            <label
-                                key={field}
-                                htmlFor={`interest-${field}`}
-                                className={`flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-all duration-150 
-                                    ${isSelected
-                                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/40 ring-2 ring-blue-500/50'
-                                        : 'border-gray-200 dark:border-gray-700 bg-gray-100 dark:bg-gray-700/50 hover:bg-gray-200 dark:hover:bg-gray-700'
-                                    }`}
-                                tabIndex="0"
-                                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleToggleInterest(field) }}
-                            >
-                                <span className="text-gray-800 dark:text-gray-200 flex-1 mr-3 font-medium">
-                                    {field}
-                                </span>
-                                <input
-                                    type="checkbox"
-                                    id={`interest-${field}`}
-                                    name="interest"
-                                    value={field}
-                                    checked={isSelected}
-                                    onChange={() => handleToggleInterest(field)}
-                                    className="h-5 w-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 dark:bg-gray-600 dark:border-gray-500"
-                                    aria-checked={isSelected}
-                                />
-                            </label>
+                            <div key={category}>
+                                <button
+                                    type="button"
+                                    onClick={() => toggleCategory(category)}
+                                    className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                                >
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-lg">{icon}</span>
+                                        <span className="font-semibold text-gray-800 dark:text-gray-200">{category}</span>
+                                        {selectedCount > 0 && (
+                                            <span className="ml-1 px-2 py-0.5 text-xs font-bold bg-blue-100 text-blue-700 dark:bg-blue-900/60 dark:text-blue-300 rounded-full">
+                                                {selectedCount}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <ChevronDown size={16} className={`text-gray-400 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
+                                </button>
+                                {isExpanded && (
+                                    <div className="px-4 pb-3 pt-1 space-y-1 bg-gray-50/50 dark:bg-gray-800/50">
+                                        {subs.map(sub => {
+                                            const isSelected = selectedInterests.includes(sub);
+                                            return (
+                                                <label
+                                                    key={sub}
+                                                    className="flex items-center gap-3 px-3 py-2 rounded-md cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
+                                                >
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={isSelected}
+                                                        onChange={() => handleToggleInterest(sub)}
+                                                        className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 dark:bg-gray-600 dark:border-gray-500"
+                                                    />
+                                                    <span className={`text-sm ${isSelected ? 'text-blue-700 dark:text-blue-300 font-medium' : 'text-gray-700 dark:text-gray-300'}`}>
+                                                        {sub}
+                                                    </span>
+                                                </label>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </div>
                         );
                     })}
                 </div>
@@ -2477,7 +2532,7 @@ const TrendingContent = ({ openTrendingModal, onExploreMore, hasInterests, onEna
                 {loadingTrending ? (
                     <div className="flex flex-col items-center justify-center py-12">
                         <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-500 border-t-transparent mb-4"></div>
-                        <p className="text-gray-500 dark:text-gray-400">Generating personalized trending content...</p>
+                        <p className="text-gray-500 dark:text-gray-400">Fetching trending news...</p>
                     </div>
                 ) : trendingError ? (
                     <div className="flex flex-col items-center justify-center py-12 text-center">
@@ -2488,50 +2543,31 @@ const TrendingContent = ({ openTrendingModal, onExploreMore, hasInterests, onEna
                     </div>
                 ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                        {(trendingTopics.length > 0 ? trendingTopics.slice(0, 4) : []).map((post) => {
-                            const platform = PLATFORMS.find(p => p.id === post.platformId);
-                            const Icon = platform ? platform.icon : Zap;
-
-                            return (
-                                <div
-                                    key={post.id}
-                                    onClick={() => openTrendingModal(post)}
-                                    className="p-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50 cursor-pointer hover:shadow-xl hover:ring-2 ring-blue-500 transition duration-200 transform hover:scale-[1.02]"
-                                    aria-label={`View trending post from ${platform ? platform.name : 'Platform'}`}
-                                    role="button"
-                                >
-                                    <div className="flex items-center justify-between mb-2">
-                                        <h4 className="text-sm font-semibold truncate text-gray-900 dark:text-gray-100" title={post.title}>
-                                            {post.title}
-                                        </h4>
-                                        <div className={`p-1 rounded-full ${platform ? platform.color : 'bg-gray-500'}`}>
-                                            <Icon size={14} className="text-white" />
-                                        </div>
-                                    </div>
-
-                                    {/* Image Preview */}
-                                    <div className="h-24 mb-3 overflow-hidden rounded-md relative group-hover:opacity-90 transition-opacity">
-                                        <img
-                                            src={post.imageUrl || `https://placehold.co/600x400/2563eb/ffffff?text=${encodeURIComponent(post.title)}`}
-                                            alt={`Thumbnail for ${post.title}`}
-                                            className="w-full h-full object-cover"
-                                        />
-                                    </div>
-
-                                    <div className="flex justify-between text-xs text-gray-600 dark:text-gray-400">
-                                        <span className="flex items-center">
-                                            <ThumbsUp size={12} className="mr-1 text-red-500" /> {post.metrics.likes}
-                                        </span>
-                                        <span className="flex items-center">
-                                            <CommentIcon size={12} className="mr-1 text-yellow-500" /> {post.metrics.comments}
-                                        </span>
-                                        <span className="flex items-center">
-                                            <Share2 size={12} className="mr-1 text-blue-500" /> {post.metrics.shares}
-                                        </span>
-                                    </div>
+                        {(trendingTopics.length > 0 ? trendingTopics.slice(0, 4) : []).map((post) => (
+                            <div
+                                key={post.id}
+                                onClick={() => openTrendingModal(post)}
+                                className="p-4 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/50 cursor-pointer hover:shadow-xl hover:ring-2 ring-blue-500 transition duration-200 transform hover:scale-[1.02]"
+                            >
+                                {/* Image */}
+                                <div className="h-24 mb-3 overflow-hidden rounded-md">
+                                    <img
+                                        src={post.imageUrl || `https://placehold.co/600x400/2563eb/ffffff?text=News`}
+                                        alt={post.title}
+                                        className="w-full h-full object-cover"
+                                    />
                                 </div>
-                            );
-                        })}
+                                {/* Title */}
+                                <h4 className="text-sm font-bold text-gray-900 dark:text-gray-100 mb-1 line-clamp-2" title={post.title}>
+                                    {post.title}
+                                </h4>
+                                {/* Category + Date */}
+                                <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400">
+                                    <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full">{post.category}</span>
+                                    {post.pubDate && <span>{new Date(post.pubDate).toLocaleDateString()}</span>}
+                                </div>
+                            </div>
+                        ))}
                     </div>
                 )}
                 {/* Explore More Button */}
@@ -2585,7 +2621,7 @@ const TrendingSidebarContent = ({ openTrendingModal, onManageInterests, trending
             ) : loadingTrending ? (
                 <div className="flex flex-col items-center justify-center py-16">
                     <div className="animate-spin rounded-full h-16 w-16 border-4 border-blue-500 border-t-transparent mb-4"></div>
-                    <p className="text-gray-500 dark:text-gray-400 text-lg">Generating personalized trending content...</p>
+                    <p className="text-gray-500 dark:text-gray-400 text-lg">Fetching trending news...</p>
                     <p className="text-sm text-gray-400 dark:text-gray-500 mt-2">This may take a few seconds...</p>
                 </div>
             ) : trendingError ? (
@@ -2598,62 +2634,38 @@ const TrendingSidebarContent = ({ openTrendingModal, onManageInterests, trending
             ) : (
                 <>
                     <p className="text-gray-600 dark:text-gray-300 mb-6">
-                        Explore the top <strong>{trendingTopics.length}</strong> trending topics based on your interests, powered by AI.
+                        Explore the top <strong>{trendingTopics.length}</strong> trending topics based on your interests. Click any card to read more.
                     </p>
                     <ol className="space-y-4">
-                        {trendingTopics.map((post, index) => {
-                            const platform = PLATFORMS.find(p => p.id === post.platformId);
-                            const Icon = platform ? platform.icon : Zap;
+                        {trendingTopics.map((post, index) => (
+                            <li
+                                key={post.id}
+                                onClick={() => openTrendingModal(post)}
+                                className="flex items-start p-4 border border-gray-200 dark:border-gray-700 rounded-xl bg-gray-50 dark:bg-gray-900/50 cursor-pointer hover:shadow-lg hover:ring-1 ring-blue-500 transition duration-200"
+                            >
+                                <span className="text-2xl font-black mr-4 text-blue-600 dark:text-blue-400 w-8 flex-shrink-0 text-right">{index + 1}.</span>
 
-                            return (
-                                <li
-                                    key={post.id}
-                                    onClick={() => openTrendingModal(post)}
-                                    className="flex items-start p-4 border border-gray-200 dark:border-gray-700 rounded-xl bg-gray-50 dark:bg-gray-900/50 cursor-pointer hover:shadow-lg hover:ring-1 ring-blue-500 transition duration-200"
-                                    aria-label={`${post.title} ranking #${index + 1}`}
-                                >
-                                    <span className="text-2xl font-black mr-4 text-blue-600 dark:text-blue-400 w-8 flex-shrink-0 text-right">{index + 1}.</span>
+                                {/* Thumbnail */}
+                                <div className="w-16 h-16 mr-4 overflow-hidden rounded-md flex-shrink-0">
+                                    <img
+                                        src={post.imageUrl || `https://placehold.co/150x150/2563eb/ffffff?text=News`}
+                                        alt={post.title}
+                                        className="w-full h-full object-cover"
+                                    />
+                                </div>
 
-                                    {/* Thumbnail */}
-                                    <div className="w-16 h-16 mr-4 overflow-hidden rounded-md flex-shrink-0">
-                                        <img
-                                            src={post.imageUrl || `https://placehold.co/150x150/2563eb/ffffff?text=${encodeURIComponent(post.title.substring(0, 10))}`}
-                                            alt={`Thumbnail for ${post.title}`}
-                                            className="w-full h-full object-cover"
-                                        />
+                                {/* Content */}
+                                <div className="flex-1 min-w-0">
+                                    <h3 className="font-bold text-gray-900 dark:text-gray-100 truncate" title={post.title}>
+                                        {post.title}
+                                    </h3>
+                                    <div className="flex items-center gap-2 mt-1">
+                                        <span className="text-xs px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full">{post.category}</span>
+                                        {post.pubDate && <span className="text-xs text-gray-500">{new Date(post.pubDate).toLocaleDateString()}</span>}
                                     </div>
-
-                                    {/* Content */}
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center mb-1">
-                                            <Icon size={14} className={`mr-2 ${platform ? platform.color.replace('bg', 'text') : 'text-gray-500'}`} />
-                                            <h3 className="font-bold text-gray-900 dark:text-gray-100 truncate" title={post.title}>
-                                                {post.title}
-                                            </h3>
-                                        </div>
-                                        <p className="text-sm text-gray-600 dark:text-gray-400 mb-2 line-clamp-2">
-                                            {post.summary}
-                                        </p>
-                                        <div className="flex items-center gap-2 mb-2">
-                                            <span className="text-xs px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full">{post.category}</span>
-                                        </div>
-
-                                        {/* Metrics */}
-                                        <div className="flex space-x-4 text-xs text-gray-500 dark:text-gray-400">
-                                            <span className="flex items-center">
-                                                <ThumbsUp size={12} className="mr-1 text-red-500" /> {post.metrics?.likes || '0'}
-                                            </span>
-                                            <span className="flex items-center">
-                                                <CommentIcon size={12} className="mr-1 text-yellow-500" /> {post.metrics?.comments || '0'}
-                                            </span>
-                                            <span className="flex items-center">
-                                                <Share2 size={12} className="mr-1 text-blue-500" /> {post.metrics?.shares || '0'}
-                                            </span>
-                                        </div>
-                                    </div>
-                                </li>
-                            );
-                        })}
+                                </div>
+                            </li>
+                        ))}
                     </ol>
 
                     <div className="mt-8 flex justify-center">
@@ -2661,7 +2673,7 @@ const TrendingSidebarContent = ({ openTrendingModal, onManageInterests, trending
                             onClick={onRefreshTrending}
                             className="px-6 py-2 text-blue-600 dark:text-blue-400 font-semibold rounded-lg border-2 border-blue-600 dark:border-blue-400 hover:bg-blue-600 hover:text-white transition-all"
                         >
-                            🔄 Refresh Trending
+                            Refresh Trending
                         </button>
                     </div>
                 </>
@@ -2671,7 +2683,7 @@ const TrendingSidebarContent = ({ openTrendingModal, onManageInterests, trending
 );
 
 
-const DashboardContent = ({ scheduledPosts, integrationsRef, isTargetingIntegrations, openTrendingModal, platformConnections, handleNavClick, hasInterests, db, userId, onDeleteFromPlatform, deleting, onNavigateToCalendar, highlightedDate, onDeleteScheduledPost, onCancelAllScheduledPosts, trendingTopics, loadingTrending, trendingError, onRefreshTrending }) => (
+const DashboardContent = ({ scheduledPosts, integrationsRef, isTargetingIntegrations, openTrendingModal, platformConnections, handleNavClick, hasInterests, db, userId, onDeleteFromPlatform, onDeleteSinglePlatform, deleting, onNavigateToCalendar, highlightedDate, onDeleteScheduledPost, onCancelAllScheduledPosts, trendingTopics, loadingTrending, trendingError, onRefreshTrending }) => (
     <div className="p-6 space-y-6">
         {/* Section 1: Platforms */}
         <div>
@@ -2838,7 +2850,7 @@ const TrendingDetailModal = ({ isOpen, onClose, topic, onDraft, onUpdateImage })
     const Icon = platform ? platform.icon : Zap;
 
     return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900 bg-opacity-70 dark:bg-opacity-80 p-4 animate-fade-in">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 animate-fade-in">
             <div className="bg-white dark:bg-gray-800 w-full max-w-2xl rounded-xl shadow-2xl overflow-hidden relative flex flex-col max-h-[90vh]">
 
                 {/* Image Header */}
@@ -2888,34 +2900,28 @@ const TrendingDetailModal = ({ isOpen, onClose, topic, onDraft, onUpdateImage })
                         {topic.title}
                     </h2>
 
-                    <div className="text-gray-600 dark:text-gray-300 text-lg mb-8 leading-relaxed">
-                        {topic.summary.split(/\n\s*\n/).map((paragraph, index) => (
-                            <p key={index} className="mb-4">
-                                {paragraph.split(/(\*\*.*?\*\*)/g).map((part, i) => {
-                                    if (part.startsWith('**') && part.endsWith('**')) {
-                                        return <strong key={i} className="font-bold text-gray-900 dark:text-gray-100">{part.slice(2, -2)}</strong>;
-                                    }
-                                    return part;
-                                })}
-                            </p>
-                        ))}
-                    </div>
+                    {/* Article Preview */}
+                    {topic.summary && (
+                        <div className="text-gray-600 dark:text-gray-300 text-base mb-6 leading-relaxed">
+                            {topic.summary.split(/\n\s*\n/).map((paragraph, index) => (
+                                <p key={index} className="mb-3">
+                                    {paragraph}
+                                </p>
+                            ))}
+                        </div>
+                    )}
 
-                    {/* Stats Grid */}
-                    <div className="grid grid-cols-3 gap-4 mb-8 p-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg border border-gray-100 dark:border-gray-700">
-                        <div className="text-center">
-                            <div className="text-xl font-bold text-gray-900 dark:text-gray-100">{topic.metrics?.likes || '0'}</div>
-                            <div className="text-xs text-gray-500 uppercase tracking-wide">Likes</div>
-                        </div>
-                        <div className="text-center border-l border-gray-200 dark:border-gray-600">
-                            <div className="text-xl font-bold text-gray-900 dark:text-gray-100">{topic.metrics?.comments || '0'}</div>
-                            <div className="text-xs text-gray-500 uppercase tracking-wide">Comments</div>
-                        </div>
-                        <div className="text-center border-l border-gray-200 dark:border-gray-600">
-                            <div className="text-xl font-bold text-gray-900 dark:text-gray-100">{topic.metrics?.shares || '0'}</div>
-                            <div className="text-xs text-gray-500 uppercase tracking-wide">Shares</div>
-                        </div>
-                    </div>
+                    {/* Read complete news link */}
+                    {topic.sourceUrl && (
+                        <a
+                            href={topic.sourceUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-block text-sm text-blue-600 dark:text-blue-400 hover:underline font-medium mb-6"
+                        >
+                            Read complete news →
+                        </a>
+                    )}
 
                     {/* Actions */}
                     <div className="flex items-center justify-end gap-3 pt-2 border-t border-gray-100 dark:border-gray-700">
@@ -2930,7 +2936,7 @@ const TrendingDetailModal = ({ isOpen, onClose, topic, onDraft, onUpdateImage })
                             className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-lg hover:from-blue-700 hover:to-indigo-700 font-semibold flex items-center gap-2 shadow-lg hover:shadow-xl transition-all transform hover:-translate-y-0.5"
                         >
                             <Sparkles size={18} />
-                            Create Post with AI
+                            Compose with AI
                         </button>
                     </div>
                 </div>
@@ -3592,12 +3598,29 @@ const SettingsContent = ({ db, userId, user }) => {
         setMessage(null);
     };
 
+    const [expandedCategories, setExpandedCategories] = useState({});
+
+    const toggleCategory = (cat) => {
+        setExpandedCategories(prev => ({ ...prev, [cat]: !prev[cat] }));
+    };
+
+    const getCategorySelectedCount = (cat) => {
+        return INTEREST_CATEGORIES[cat].subs.filter(s => selectedInterests.includes(s)).length;
+    };
+
     const handleSave = async () => {
         if (!db || !userId) return;
 
         // Prevent saving while data is still loading (race condition protection)
         if (loading) {
             setMessage({ type: 'error', text: 'Please wait for settings to load before saving.' });
+            return;
+        }
+
+        // If personalization is on but no interests selected, revert toggle and show error
+        if (personalizationEnabled && selectedInterests.length === 0) {
+            setPersonalizationEnabled(false);
+            setMessage({ type: 'error', text: 'Please select at least one interest to enable personalization.' });
             return;
         }
 
@@ -3805,20 +3828,52 @@ const SettingsContent = ({ db, userId, user }) => {
                             <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
                                 Select your interests ({selectedInterests.length} selected)
                             </p>
-                            <div className="flex flex-wrap gap-2 max-h-64 overflow-y-auto p-2 border border-gray-200 dark:border-gray-700 rounded-lg">
-                                {INTEREST_FIELDS.map(interest => {
-                                    const isSelected = selectedInterests.includes(interest);
+                            <div className="max-h-80 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-lg divide-y divide-gray-200 dark:divide-gray-700">
+                                {Object.entries(INTEREST_CATEGORIES).map(([category, { icon, subs }]) => {
+                                    const isExpanded = expandedCategories[category];
+                                    const selectedCount = getCategorySelectedCount(category);
                                     return (
-                                        <button
-                                            key={interest}
-                                            onClick={() => handleToggleInterest(interest)}
-                                            className={`px-3 py-1.5 text-sm rounded-full border transition-all ${isSelected
-                                                ? 'bg-blue-600 text-white border-blue-600'
-                                                : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-300 dark:border-gray-600 hover:border-blue-400'
-                                                }`}
-                                        >
-                                            {isSelected ? '✓ ' : ''}{interest}
-                                        </button>
+                                        <div key={category}>
+                                            <button
+                                                type="button"
+                                                onClick={() => toggleCategory(category)}
+                                                className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                                            >
+                                                <div className="flex items-center gap-2">
+                                                    <span className="text-lg">{icon}</span>
+                                                    <span className="font-semibold text-gray-800 dark:text-gray-200">{category}</span>
+                                                    {selectedCount > 0 && (
+                                                        <span className="ml-1 px-2 py-0.5 text-xs font-bold bg-blue-100 text-blue-700 dark:bg-blue-900/60 dark:text-blue-300 rounded-full">
+                                                            {selectedCount}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <ChevronDown size={16} className={`text-gray-400 transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} />
+                                            </button>
+                                            {isExpanded && (
+                                                <div className="px-4 pb-3 pt-1 space-y-1 bg-gray-50/50 dark:bg-gray-800/50">
+                                                    {subs.map(sub => {
+                                                        const isSelected = selectedInterests.includes(sub);
+                                                        return (
+                                                            <label
+                                                                key={sub}
+                                                                className="flex items-center gap-3 px-3 py-2 rounded-md cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
+                                                            >
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={isSelected}
+                                                                    onChange={() => handleToggleInterest(sub)}
+                                                                    className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500 dark:bg-gray-600 dark:border-gray-500"
+                                                                />
+                                                                <span className={`text-sm ${isSelected ? 'text-blue-700 dark:text-blue-300 font-medium' : 'text-gray-700 dark:text-gray-300'}`}>
+                                                                    {sub}
+                                                                </span>
+                                                            </label>
+                                                        );
+                                                    })}
+                                                </div>
+                                            )}
+                                        </div>
                                     );
                                 })}
                             </div>
@@ -3829,8 +3884,8 @@ const SettingsContent = ({ db, userId, user }) => {
                     <div className="mt-6 flex items-center gap-4">
                         <button
                             onClick={handleSave}
-                            disabled={saving}
-                            className={`px-6 py-2 rounded-lg font-semibold text-white transition-colors ${saving ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
+                            disabled={saving || (personalizationEnabled && selectedInterests.length === 0)}
+                            className={`px-6 py-2 rounded-lg font-semibold text-white transition-colors ${saving || (personalizationEnabled && selectedInterests.length === 0) ? 'bg-blue-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'
                                 }`}
                         >
                             {saving ? 'Saving...' : 'Save Preferences'}
@@ -3932,10 +3987,61 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
     const imageLoadedRef = useRef(false);
     const lastImageUrlRef = useRef(null);
 
+    // Trending topic context for Compose with AI flow
+    const trendingTopicRef = useRef(null);
+    const [pendingPlatformSelection, setPendingPlatformSelection] = useState([]);
+
     // Load initial data if provided (e.g. from Trending Topics or Drafts)
     useEffect(() => {
         if (initialData) {
             console.log("Loading initial data into composer:", initialData);
+
+            // --- Compose with AI mode: open AI chat with interactive platform selection ---
+            if (initialData.mode === 'composeWithAI') {
+                const connectedPlatformIds = Object.keys(platformConnections || {}).filter(k => platformConnections[k]);
+                trendingTopicRef.current = {
+                    title: initialData.topicTitle,
+                    summary: initialData.topicSummary,
+                    category: initialData.topicCategory,
+                    sourceUrl: initialData.sourceUrl,
+                    imageUrl: initialData.imageUrl
+                };
+                // Pre-select all connected platforms
+                setPendingPlatformSelection(connectedPlatformIds);
+                // Open AI chat and inject the interactive platform selection message
+                setShowAiChat(true);
+                setChatMessages([
+                    {
+                        role: 'assistant',
+                        type: 'platform_select',
+                        content: `📝 Content request received for:\n\n"${initialData.topicTitle}"\n\nWhich platforms would you like me to draft for?`,
+                        topicTitle: initialData.topicTitle,
+                        topicSummary: initialData.topicSummary,
+                        topicCategory: initialData.topicCategory,
+                        sourceUrl: initialData.sourceUrl,
+                        connectedPlatforms: connectedPlatformIds
+                    }
+                ]);
+                // Load image if provided
+                if (initialData.imageUrl && initialData.imageUrl !== lastImageUrlRef.current) {
+                    lastImageUrlRef.current = initialData.imageUrl;
+                    const proxyUrl = `http://localhost:8006/proxy-image?url=${encodeURIComponent(initialData.imageUrl)}`;
+                    fetch(proxyUrl)
+                        .then(res => { if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`); return res.blob(); })
+                        .then(blob => {
+                            if (blob.size < 100) throw new Error("Image blob too small");
+                            const objectUrl = URL.createObjectURL(blob);
+                            setUploadedImage(objectUrl);
+                            setImageMimeType("image/jpeg");
+                            const reader = new FileReader();
+                            reader.onloadend = () => { setImageBase64(reader.result); imageLoadedRef.current = true; };
+                            reader.readAsDataURL(blob);
+                        })
+                        .catch(err => { console.warn('Image load failed:', err.message); });
+                }
+                if (onClearInitialData) setTimeout(onClearInitialData, 50);
+                return; // Don't run legacy loading below
+            }
 
             // Load per-platform drafts if available, else fallback to single content
             if (initialData.platformDrafts) {
@@ -4299,6 +4405,135 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
             setChatMessages(prev => [...prev, {
                 role: 'assistant',
                 content: '❌ Could not reach AI service. Is the agent-service running?'
+            }]);
+        } finally {
+            setIsAiTyping(false);
+        }
+    };
+
+    // --- Compose from Trending: called when user selects platforms and clicks Continue ---
+    const handleComposeFromTrending = async (selectedPlatformIds) => {
+        const topic = trendingTopicRef.current;
+        if (!topic || selectedPlatformIds.length === 0) return;
+
+        // Add user-like message showing what was selected
+        const platformNames = selectedPlatformIds.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(', ');
+        setChatMessages(prev => [...prev,
+        { role: 'user', content: `Generate drafts for: ${platformNames}` }
+        ]);
+        setIsAiTyping(true);
+
+        try {
+            const { draftFromTrending } = await import('./api/social');
+            const response = await draftFromTrending(
+                topic.title,
+                topic.summary || '',
+                topic.sourceUrl || '',
+                selectedPlatformIds
+            );
+
+            if (response.success && response.drafts) {
+                // Load each platform's draft into tabs
+                setPlatformDrafts(prev => ({ ...prev, ...response.drafts }));
+                setSelectedPlatforms(selectedPlatformIds);
+                setActivePlatform(selectedPlatformIds[0]);
+
+                // Initialize tones
+                const newTones = {};
+                selectedPlatformIds.forEach(p => {
+                    newTones[p] = PLATFORM_DEFAULT_TONES[p] || 'neutral';
+                });
+                setPlatformTones(prev => ({ ...prev, ...newTones }));
+
+                setChatMessages(prev => [...prev, {
+                    role: 'assistant',
+                    content: `✨ Drafts generated for ${selectedPlatformIds.length} platform${selectedPlatformIds.length > 1 ? 's' : ''}! Review them in the tabs on the left.\n\nFeel free to ask me to refine the content, change tone, or add hashtags.`
+                }]);
+                setStatusMessage({ type: 'success', text: '✨ AI drafts loaded into platform tabs!' });
+            } else {
+                setChatMessages(prev => [...prev, {
+                    role: 'assistant',
+                    content: `❌ Failed to generate drafts: ${response.error || 'Unknown error'}. You can try again using the chat.`
+                }]);
+            }
+        } catch (error) {
+            console.error('Compose from trending error:', error);
+            setChatMessages(prev => [...prev, {
+                role: 'assistant',
+                content: '❌ Could not reach AI service. Is the agent-service running?'
+            }]);
+        } finally {
+            setIsAiTyping(false);
+        }
+    };
+
+    // --- Tailor existing content for a newly-added platform ---
+    const handleTailorForPlatform = async (platformId) => {
+        // Find existing content from another platform to use as base
+        const existingContent = Object.entries(platformDrafts).find(([key, val]) => val && val.trim());
+        if (!existingContent) return;
+
+        const [sourcePlatform, sourceContent] = existingContent;
+        setIsAiTyping(true);
+        setShowAiChat(true);
+        const platformName = platformId.charAt(0).toUpperCase() + platformId.slice(1);
+
+        setChatMessages(prev => [...prev,
+        { role: 'user', content: `Tailor the existing post for ${platformName}` }
+        ]);
+
+        try {
+            const { chatWithAI } = await import('./api/social');
+            const connectedPlatformIds = Object.keys(platformConnections).filter(k => platformConnections[k]);
+
+            const response = await chatWithAI(
+                `Tailor the following post for ${platformName}. Adapt the tone, length, and style for ${platformName}'s audience. Keep the same core message but optimize for the platform:\n\n${sourceContent}`,
+                sourceContent,
+                [],
+                [platformId],
+                connectedPlatformIds,
+                imageBase64,
+                imageMimeType,
+                {
+                    selected_platforms: [platformId],
+                    connected_platforms: connectedPlatformIds,
+                    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                }
+            );
+
+            if (response.success) {
+                // Use suggested_platforms if available, otherwise suggested_content
+                let tailoredContent = '';
+                if (response.suggested_platforms && response.suggested_platforms[platformId]) {
+                    tailoredContent = response.suggested_platforms[platformId];
+                } else if (response.suggested_content) {
+                    tailoredContent = response.suggested_content;
+                }
+
+                if (tailoredContent) {
+                    setPlatformDrafts(prev => ({ ...prev, [platformId]: tailoredContent }));
+                    setChatMessages(prev => [...prev, {
+                        role: 'assistant',
+                        content: `✨ ${platformName} version ready! Check the ${platformName} tab to review.\n\n${response.reply || ''}`
+                    }]);
+                    setStatusMessage({ type: 'success', text: `✨ ${platformName} draft generated!` });
+                } else {
+                    setChatMessages(prev => [...prev, {
+                        role: 'assistant',
+                        content: response.reply || '❌ Could not generate content for this platform.'
+                    }]);
+                }
+            } else {
+                setChatMessages(prev => [...prev, {
+                    role: 'assistant',
+                    content: '❌ Failed to tailor content. Please try again.'
+                }]);
+            }
+        } catch (error) {
+            console.error('Tailor error:', error);
+            setChatMessages(prev => [...prev, {
+                role: 'assistant',
+                content: '❌ Could not reach AI service.'
             }]);
         } finally {
             setIsAiTyping(false);
@@ -4979,7 +5214,7 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
                                     )}
 
                                     {/* Content Area */}
-                                    <div className="p-4 bg-white dark:bg-gray-800 flex gap-4 min-h-[160px] rounded-b-xl">
+                                    <div className="p-4 bg-white dark:bg-gray-800 flex gap-4 rounded-b-xl">
                                         {/* Avatar */}
                                         <div className="flex-shrink-0 pt-1">
                                             <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-500 to-purple-500 flex items-center justify-center text-white text-xs font-bold shadow-sm">
@@ -4997,12 +5232,28 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
                                             <textarea
                                                 ref={textareaRef}
                                                 value={content}
-                                                onChange={(e) => setContent(e.target.value)}
+                                                onChange={(e) => {
+                                                    setContent(e.target.value);
+                                                    // Auto-grow: reset height then set to scrollHeight
+                                                    e.target.style.height = 'auto';
+                                                    e.target.style.height = e.target.scrollHeight + 'px';
+                                                }}
                                                 placeholder={activePlatform ? `What do you want to share on ${activePlatform}?` : 'Select or add a platform to start writing...'}
-                                                className="w-full flex-1 min-h-[100px] p-0 bg-transparent border-none text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 resize-none focus:outline-none focus:ring-0 leading-relaxed text-base"
-                                                style={{ fontFamily: 'inherit' }}
+                                                className="w-full min-h-[120px] p-0 bg-transparent border-none text-gray-800 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 resize-none focus:outline-none focus:ring-0 leading-relaxed text-base"
+                                                style={{ fontFamily: 'inherit', overflow: 'hidden' }}
                                             />
 
+                                            {/* Tailor this post button — shows when platform has no content but others do */}
+                                            {activePlatform && !content.trim() && anyPlatformHasContent() && (
+                                                <button
+                                                    onClick={() => handleTailorForPlatform(activePlatform)}
+                                                    disabled={isAiTyping}
+                                                    className="mb-3 w-full py-3 bg-gradient-to-r from-purple-500 to-indigo-500 text-white text-sm font-semibold rounded-lg hover:from-purple-600 hover:to-indigo-600 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-md hover:shadow-lg"
+                                                >
+                                                    <Sparkles size={16} />
+                                                    {isAiTyping ? 'Generating...' : `✨ Tailor this post for ${activePlatform.charAt(0).toUpperCase() + activePlatform.slice(1)}`}
+                                                </button>
+                                            )}
 
                                             {/* Character count - right below textarea */}
                                             <p className="text-xs text-gray-500 mb-3 text-right">{content.length}/3000</p>
@@ -5192,6 +5443,57 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
                                                 : 'bg-gray-100 dark:bg-gray-700 text-gray-800 dark:text-gray-100 rounded-bl-sm'
                                                 }`}>
                                                 <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+
+                                                {/* Interactive platform selection (Compose with AI flow) */}
+                                                {msg.type === 'platform_select' && msg.connectedPlatforms && (
+                                                    <div className="mt-3 pt-3 border-t border-gray-300/50 dark:border-gray-600/50">
+                                                        <div className="space-y-2 mb-3">
+                                                            {msg.connectedPlatforms.map(pId => {
+                                                                const platform = PLATFORMS.find(p => p.id === pId);
+                                                                if (!platform) return null;
+                                                                const isChecked = pendingPlatformSelection.includes(pId);
+                                                                return (
+                                                                    <label
+                                                                        key={pId}
+                                                                        className={`flex items-center gap-3 p-2.5 rounded-lg cursor-pointer transition-all ${isChecked
+                                                                            ? 'bg-blue-50 dark:bg-blue-900/30 ring-1 ring-blue-400'
+                                                                            : 'hover:bg-gray-200/50 dark:hover:bg-gray-600/50'
+                                                                            }`}
+                                                                    >
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            checked={isChecked}
+                                                                            onChange={() => {
+                                                                                setPendingPlatformSelection(prev =>
+                                                                                    prev.includes(pId)
+                                                                                        ? prev.filter(x => x !== pId)
+                                                                                        : [...prev, pId]
+                                                                                );
+                                                                            }}
+                                                                            className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                                                                        />
+                                                                        <platform.icon size={18} className={platform.color.replace('bg-', 'text-')} />
+                                                                        <span className="text-sm font-medium">{platform.name}</span>
+                                                                    </label>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                        {pendingPlatformSelection.length > 0 && (
+                                                            <button
+                                                                onClick={() => handleComposeFromTrending(pendingPlatformSelection)}
+                                                                disabled={isAiTyping}
+                                                                className="w-full py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm font-semibold rounded-lg hover:from-blue-700 hover:to-indigo-700 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
+                                                            >
+                                                                <Sparkles size={16} />
+                                                                Continue →
+                                                            </button>
+                                                        )}
+                                                        {pendingPlatformSelection.length === 0 && (
+                                                            <p className="text-xs text-gray-500 dark:text-gray-400 text-center">Select at least one platform to continue</p>
+                                                        )}
+                                                    </div>
+                                                )}
+
                                                 {msg.suggestedContent && (
                                                     <div className="mt-2 pt-2 border-t border-white/20 text-xs opacity-80">
                                                         ✅ Applied to preview
@@ -5295,6 +5597,7 @@ const App = () => {
     const [composerHasUnsavedContent, setComposerHasUnsavedContent] = useState(false);
     const [showComposerSavePopup, setShowComposerSavePopup] = useState(false);
     const [pendingNavPath, setPendingNavPath] = useState(null);
+    const [showNoPlatformPopup, setShowNoPlatformPopup] = useState(false);
     const composerSaveDraftRef = useRef(null); // Ref to call saveDraft from ComposerContent
 
     // --- NEW ONBOARDING STATE ---
@@ -5315,7 +5618,7 @@ const App = () => {
         setTrendingError(null);
 
         try {
-            const result = await fetchTrendingTopics(forceRefresh, 10);
+            const result = await fetchTrendingTopicsFast(forceRefresh);
 
             if (result.success) {
                 setTrendingTopics(result.topics);
@@ -5446,6 +5749,62 @@ const App = () => {
 
     // Delete from platform state and handler
     const [deleting, setDeleting] = useState(false);
+
+    // Delete a single platform from a multi-platform scheduled post
+    const handleDeleteSinglePlatform = useCallback(async (post, platformId) => {
+        setDeleting(true);
+        if (!db || !userId) return;
+
+        try {
+            const { deleteDoc, updateDoc, deleteField, doc } = await import('firebase/firestore');
+
+            // 1. Remote Delete (if applicable/posted)
+            if (post.status === 'posted') {
+                const remoteId = post.platformPostIds?.[platformId];
+                if (remoteId && platformId === 'linkedin') {
+                    try {
+                        const socialApi = await import('./api/social.js');
+                        if (socialApi.deleteFromLinkedIn) {
+                            await socialApi.deleteFromLinkedIn(remoteId);
+                            addToast('Deleted from LinkedIn remote', 'success');
+                        }
+                    } catch (e) {
+                        console.warn('Remote delete failed', e);
+                    }
+                }
+            }
+
+            // 2. Firestore Update
+            // Check if this is the last platform
+            const currentPlatforms = post.platforms || [];
+            const remainingPlatforms = currentPlatforms.filter(p => p !== platformId);
+
+            if (remainingPlatforms.length === 0) {
+                // Delete entire doc
+                await deleteDoc(doc(db, `users/${userId}/scheduled_posts/${post.id}`));
+                addToast('Post deleted completely', 'success');
+            } else {
+                // Update doc to remove platform data
+                const postRef = doc(db, `users/${userId}/scheduled_posts/${post.id}`);
+                const updates = {
+                    platforms: remainingPlatforms
+                };
+                // Remove platform specific fields
+                if (post.platformDrafts?.[platformId]) updates[`platformDrafts.${platformId}`] = deleteField();
+                if (post.platformTones?.[platformId]) updates[`platformTones.${platformId}`] = deleteField();
+                if (post.platformPostIds?.[platformId]) updates[`platformPostIds.${platformId}`] = deleteField();
+
+                await updateDoc(postRef, updates);
+                const pName = PLATFORMS.find(p => p.id === platformId)?.name || platformId;
+                addToast(`Removed from ${pName}`, 'success');
+            }
+        } catch (error) {
+            console.error('Delete error:', error);
+            addToast(`Failed to delete: ${error.message}`, 'error');
+        } finally {
+            setDeleting(false);
+        }
+    }, [db, userId, addToast]);
 
     const handleDeleteFromPlatform = useCallback(async (post) => {
         setDeleting(true);
@@ -5669,21 +6028,28 @@ const App = () => {
         setModalTopic(null);
     }, []);
 
-    // Handler to start a draft from a trending topic
+    // Handler to start a draft from a trending topic — opens Composer with AI chat
     const handleDraftTrendingPost = useCallback((topic) => {
-        // Create rich draft content from the topic
-        const draftContent = `${topic.title}\n\n${topic.summary}\n\n#${topic.category?.replace(/\s+/g, '') || 'Trending'} #SoicalConnectIQ`;
+        // Guard: check if at least one platform is connected
+        const connectedPlatforms = Object.keys(platformConnections || {}).filter(k => platformConnections[k]);
+        if (connectedPlatforms.length === 0) {
+            setShowNoPlatformPopup(true);
+            return;
+        }
 
         setPendingDraft({
-            content: draftContent,
-            platforms: topic.platformId ? [topic.platformId] : [],
-            imageUrl: topic.imageUrl // Pass the image URL (possibly regenerated)
+            mode: 'composeWithAI',
+            topicTitle: topic.title,
+            topicSummary: topic.summary,
+            topicCategory: topic.category,
+            sourceUrl: topic.sourceUrl,
+            imageUrl: topic.imageUrl
         });
 
         setIsTrendingModalOpen(false);
         setView('composer');
-        addToast(`Preparing draft for: ${topic.title}`, 'success');
-    }, [addToast]);
+        addToast(`✨ Opening AI Composer for: ${topic.title?.slice(0, 50)}...`, 'success');
+    }, [addToast, platformConnections]);
 
     // Handler for Trending Auth Modal completion (updates centralized state)
     const handleTrendingConnect = useCallback((platformId, status) => {
@@ -5941,6 +6307,7 @@ const App = () => {
                     db={db}
                     userId={userId}
                     onDeleteFromPlatform={handleDeleteFromPlatform}
+                    onDeleteSinglePlatform={handleDeleteSinglePlatform}
                     deleting={deleting}
                     onNavigateToCalendar={handleNavigateToCalendar}
                     highlightedDate={highlightedDate}
@@ -6086,6 +6453,43 @@ const App = () => {
                                 className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors"
                             >
                                 Save Draft
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* No Platform Connected Popup */}
+            {showNoPlatformPopup && (
+                <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+                    <div className={`rounded-xl shadow-2xl max-w-md w-full p-6 relative ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}>
+                        {/* Red X Close Button */}
+                        <button
+                            onClick={() => setShowNoPlatformPopup(false)}
+                            className="absolute top-2 right-2 p-2 rounded-lg bg-red-500 hover:bg-red-600 text-white transition-colors cursor-pointer shadow-md z-50"
+                            title="Close"
+                        >
+                            <X size={20} strokeWidth={3} />
+                        </button>
+                        <div className="flex items-center gap-3 mb-3">
+                            <div className="p-2 bg-amber-100 dark:bg-amber-900/30 rounded-full">
+                                <Zap size={24} className="text-amber-600 dark:text-amber-400" />
+                            </div>
+                            <h3 className={`text-lg font-bold pr-10 ${isDarkMode ? 'text-gray-100' : 'text-gray-900'}`}>Connect a Platform First</h3>
+                        </div>
+                        <p className={`mb-6 ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                            You need to connect at least <strong>1 platform</strong> (LinkedIn, Twitter, etc.) before you can compose posts with AI.
+                        </p>
+                        <div className="flex gap-3 justify-end">
+                            <button
+                                onClick={() => {
+                                    setShowNoPlatformPopup(false);
+                                    setIsTrendingModalOpen(false);
+                                    handleNavClick('integrations_page');
+                                }}
+                                className="px-5 py-2.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors font-semibold flex items-center gap-2"
+                            >
+                                Connect Now →
                             </button>
                         </div>
                     </div>

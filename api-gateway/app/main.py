@@ -177,11 +177,13 @@ async def route_linkedin_auth(request: Request):
 @app.get("/api/integrations/linkedin/callback")
 async def route_linkedin_callback(code: str, state: str = None):
     """Route LinkedIn OAuth callback to integration service"""
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=60.0) as client:
         try:
             params = {"code": code}
             if state:
                 params["state"] = state
+            
+            print(f"🔄 [API-GATEWAY] LinkedIn callback → forwarding to Integration Service (timeout=60s)")
             
             response = await client.get(
                 f"{INTEGRATION_SERVICE_URL}/api/integrations/linkedin/callback",
@@ -196,9 +198,11 @@ async def route_linkedin_callback(code: str, state: str = None):
             response.raise_for_status()
             return JSONResponse(content=response.json(), status_code=response.status_code)
         except httpx.RequestError as exc:
+            print(f"❌ [API-GATEWAY] LinkedIn callback FAILED: {type(exc).__name__}: {str(exc)}")
             # On error, redirect to oauth-callback.html so popup can postMessage and close
             return RedirectResponse(url="http://localhost:3000/oauth-callback.html?status=error&platform=linkedin&message=gateway_request_error")
         except httpx.HTTPStatusError as exc:
+            print(f"❌ [API-GATEWAY] LinkedIn callback HTTP error: {exc.response.status_code}")
             return RedirectResponse(url="http://localhost:3000/oauth-callback.html?status=error&platform=linkedin&message=gateway_http_error")
 
 
@@ -260,6 +264,25 @@ async def route_linkedin_disconnect(request: Request):
 # Facebook Integration Routes
 # ============================================
 
+@app.post("/api/integrations/facebook/post-with-image")
+async def route_facebook_post_with_image(request: Request):
+    """Route Facebook post-with-image to integration service"""
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        try:
+            body = await request.json()
+            response = await client.post(
+                f"{INTEGRATION_SERVICE_URL}/api/integrations/facebook/post-with-image",
+                json=body,
+                headers={k: v for k, v in request.headers.items() if k.lower() not in ('host', 'content-length')},
+                timeout=60.0
+            )
+            response.raise_for_status()
+            return JSONResponse(content=response.json(), status_code=response.status_code)
+        except httpx.RequestError as exc:
+            raise HTTPException(status_code=503, detail=f"Error connecting to integration service: {exc}")
+        except httpx.HTTPStatusError as exc:
+            return JSONResponse(content=exc.response.json() if exc.response.text else {"detail": "Service error"}, status_code=exc.response.status_code)
+
 @app.post("/api/integrations/facebook/auth")
 async def route_facebook_auth(request: Request):
     """Route Facebook OAuth initiation to integration service"""
@@ -280,7 +303,13 @@ async def route_facebook_auth(request: Request):
 @app.get("/api/integrations/facebook/callback")
 async def route_facebook_callback(code: str, state: str = None):
     """Route Facebook OAuth callback to integration service"""
-    async with httpx.AsyncClient() as client:
+    print("\n" + "="*100)
+    print("🔄 [API-GATEWAY] Facebook Callback - Forwarding to Integration Service")
+    print(f"   Code length: {len(code)}")
+    print("="*100)
+
+    # Increased timeout to 60s for OAuth token exchange
+    async with httpx.AsyncClient(timeout=60.0) as client:
         try:
             params = {"code": code}
             if state:
@@ -292,12 +321,21 @@ async def route_facebook_callback(code: str, state: str = None):
                 follow_redirects=False
             )
             
+            print(f"📥 [API-GATEWAY] Response from Integration Service: {response.status_code}")
+
             if response.status_code in (301, 302, 303, 307, 308):
-                return RedirectResponse(url=response.headers.get('location', 'http://localhost:3000/oauth-callback.html?status=error&platform=facebook&message=no_redirect_location'))
+                location = response.headers.get('location', 'http://localhost:3000/oauth-callback.html?status=error&platform=facebook&message=no_redirect_location')
+                print(f"✅ [API-GATEWAY] Redirecting to: {location}")
+                return RedirectResponse(url=location)
             
             response.raise_for_status()
             return JSONResponse(content=response.json(), status_code=response.status_code)
-        except (httpx.RequestError, httpx.HTTPStatusError):
+
+        except httpx.RequestError as exc:
+            print(f"❌ [API-GATEWAY] Request Error: {exc}")
+            return RedirectResponse(url="http://localhost:3000/oauth-callback.html?status=error&platform=facebook&message=gateway_timeout")
+        except httpx.HTTPStatusError as exc:
+            print(f"❌ [API-GATEWAY] HTTP Error: {exc.response.status_code}")
             return RedirectResponse(url="http://localhost:3000/oauth-callback.html?status=error&platform=facebook&message=gateway_error")
 
 
@@ -362,7 +400,12 @@ async def route_twitter_auth(request: Request):
 @app.get("/api/integrations/twitter/callback")
 async def route_twitter_callback(code: str, state: str = None):
     """Route Twitter OAuth callback to integration service"""
-    async with httpx.AsyncClient() as client:
+    print("\n" + "="*100)
+    print("🔄 [API-GATEWAY] Twitter Callback - Forwarding to Integration Service")
+    print("="*100)
+
+    # Increased timeout to 60s for OAuth token exchange
+    async with httpx.AsyncClient(timeout=60.0) as client:
         try:
             params = {"code": code}
             if state:
@@ -375,11 +418,18 @@ async def route_twitter_callback(code: str, state: str = None):
             )
             
             if response.status_code in (301, 302, 303, 307, 308):
-                return RedirectResponse(url=response.headers.get('location', 'http://localhost:3000/oauth-callback.html?status=error&platform=twitter&message=no_redirect_location'))
+                location = response.headers.get('location', 'http://localhost:3000/oauth-callback.html?status=error&platform=twitter&message=no_redirect_location')
+                print(f"✅ [API-GATEWAY] Redirecting to: {location}")
+                return RedirectResponse(url=location)
             
             response.raise_for_status()
             return JSONResponse(content=response.json(), status_code=response.status_code)
-        except (httpx.RequestError, httpx.HTTPStatusError):
+
+        except httpx.RequestError as exc:
+            print(f"❌ [API-GATEWAY] Request Error: {exc}")
+            return RedirectResponse(url="http://localhost:3000/oauth-callback.html?status=error&platform=twitter&message=gateway_timeout")
+        except httpx.HTTPStatusError as exc:
+            print(f"❌ [API-GATEWAY] HTTP Error: {exc.response.status_code}")
             return RedirectResponse(url="http://localhost:3000/oauth-callback.html?status=error&platform=twitter&message=gateway_error")
 
 

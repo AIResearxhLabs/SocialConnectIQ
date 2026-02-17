@@ -568,7 +568,7 @@ async def linkedin_status(user_id: str = Header(..., alias="X-User-ID")):
 
 @app.post("/api/integrations/linkedin/post")
 async def post_to_linkedin(post_request: PostRequest):
-    """Post content to LinkedIn using stored tokens via Agent Service"""
+    """Post content to LinkedIn using stored tokens via LinkedIn REST API directly"""
     print("\n" + "="*100)
     print("📤 [INTEGRATION-SERVICE] LinkedIn Post Request Received")
     print("="*100)
@@ -582,49 +582,78 @@ async def post_to_linkedin(post_request: PostRequest):
         print(f"❌ [INTEGRATION-SERVICE] No LinkedIn tokens found for user {post_request.user_id}")
         raise HTTPException(status_code=401, detail="LinkedIn not connected. Please authenticate first.")
     
+    access_token = tokens.get('access_token')
     print(f"✅ [INTEGRATION-SERVICE] Retrieved access token from Firestore")
-    print(f"🤖 [INTEGRATION-SERVICE] Delegating to Agent Service for LLM-powered posting")
     
-    # Delegate to Agent Service (which uses LLM + MCP Client)
+    # LinkedIn API headers
+    linkedin_headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+        "LinkedIn-Version": "202602",
+        "X-Restli-Protocol-Version": "2.0.0"
+    }
+    
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
-            response = await client.post(
-                f"{AGENT_SERVICE_URL}/agent/linkedin/post",
-                json={
-                    "content": post_request.content,
-                    "access_token": tokens.get('access_token'),
-                    "user_id": post_request.user_id
+            # Step 1: Get LinkedIn person URN
+            print("📍 [STEP 1] Getting LinkedIn profile for person URN...")
+            profile_response = await client.get(
+                "https://api.linkedin.com/v2/userinfo",
+                headers={"Authorization": f"Bearer {access_token}"}
+            )
+            profile_response.raise_for_status()
+            profile_data = profile_response.json()
+            person_id = profile_data.get("sub")
+            print(f"✅ [STEP 1] Got person ID: {person_id}")
+            
+            # Step 2: Create text post
+            print("📍 [STEP 2] Creating LinkedIn text post...")
+            
+            post_data = {
+                "author": f"urn:li:person:{person_id}",
+                "lifecycleState": "PUBLISHED",
+                "visibility": "PUBLIC",
+                "commentary": post_request.content,
+                "distribution": {
+                    "feedDistribution": "MAIN_FEED",
+                    "targetEntities": [],
+                    "thirdPartyDistributionChannels": []
                 }
+            }
+            
+            create_post_response = await client.post(
+                "https://api.linkedin.com/rest/posts",
+                json=post_data,
+                headers=linkedin_headers
             )
             
-            print(f"📥 [INTEGRATION-SERVICE] Agent Service Response Status: {response.status_code}")
+            if create_post_response.status_code not in [200, 201]:
+                print(f"❌ [STEP 2] Create post failed: {create_post_response.status_code}")
+                print(f"   Response: {create_post_response.text}")
+                raise HTTPException(status_code=500, detail=f"Failed to create LinkedIn post: {create_post_response.text}")
             
-            if response.status_code == 401:
-                print(f"❌ [INTEGRATION-SERVICE] Token expired")
-                raise HTTPException(
-                    status_code=401, 
-                    detail="LinkedIn token expired. Please re-authenticate."
-                )
-            
-            response.raise_for_status()
-            result = response.json()
-            
-            print(f"✅ [INTEGRATION-SERVICE] Post successful!")
+            # Extract post ID from response header
+            post_id = create_post_response.headers.get("x-restli-id", "")
+            print(f"✅ [STEP 2] Post created successfully! Post ID: {post_id}")
             print("="*100 + "\n")
             
-            return result
+            return {
+                "success": True,
+                "post_id": post_id,
+                "message": "Posted to LinkedIn successfully"
+            }
             
         except httpx.HTTPStatusError as exc:
-            print(f"❌ [INTEGRATION-SERVICE] HTTP error from Agent Service: {exc.response.status_code}")
+            print(f"❌ [INTEGRATION-SERVICE] HTTP error: {exc.response.status_code}")
+            print(f"   Response: {exc.response.text}")
             if exc.response.status_code == 401:
-                raise HTTPException(
-                    status_code=401,
-                    detail="LinkedIn token expired. Please re-authenticate."
-                )
-            raise HTTPException(status_code=exc.response.status_code, detail=str(exc))
-        except httpx.RequestError as exc:
-            print(f"❌ [INTEGRATION-SERVICE] Connection error to Agent Service: {str(exc)}")
-            raise HTTPException(status_code=503, detail=f"Could not connect to Agent Service: {str(exc)}")
+                raise HTTPException(status_code=401, detail="LinkedIn token expired. Please re-authenticate.")
+            raise HTTPException(status_code=exc.response.status_code, detail=exc.response.text)
+        except Exception as exc:
+            import traceback
+            print(f"❌ [INTEGRATION-SERVICE] Error posting to LinkedIn: {type(exc).__name__}: {str(exc)}")
+            print(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=f"Error posting to LinkedIn: {str(exc)}")
 
 @app.post("/api/integrations/facebook/post")
 async def post_to_facebook(post_request: PostRequest):
@@ -688,33 +717,116 @@ async def post_to_facebook(post_request: PostRequest):
             print(f"❌ [INTEGRATION-SERVICE] Failed to connect to Agent Service: {str(e)}")
             raise HTTPException(status_code=503, detail=f"Could not connect to Agent Service: {str(e)}")
 
+
+@app.post("/api/integrations/facebook/post-with-image")
+async def post_to_facebook_with_image(post_request: PostWithImageRequest):
+    """
+    Post content with image to Facebook Page using the Graph API.
+    
+    Facebook Image Post Process (direct):
+    1. Retrieve Page Access Token + Page ID from Firestore
+    2. Decode base64 image
+    3. POST to /{page_id}/photos with multipart form data (image + message)
+    """
+    print("\n" + "="*100)
+    print("🖼️ [INTEGRATION-SERVICE] Facebook Post WITH IMAGE Request")
+    print("="*100)
+    print(f"👤 [INTEGRATION-SERVICE] User ID: {post_request.user_id}")
+    print(f"📝 [INTEGRATION-SERVICE] Content length: {len(post_request.content)} chars")
+    print(f"🖼️ [INTEGRATION-SERVICE] Image type: {post_request.image_mime_type}")
+    print(f"📏 [INTEGRATION-SERVICE] Image data length: {len(post_request.image_data)} chars (base64)")
+    
+    # Get user's Facebook tokens from Firestore
+    tokens = await get_user_tokens(post_request.user_id, 'facebook')
+    
+    if not tokens or not tokens.get('access_token'):
+        print(f"❌ [INTEGRATION-SERVICE] No Facebook tokens found for user {post_request.user_id}")
+        raise HTTPException(status_code=401, detail="Facebook not connected. Please authenticate first.")
+    
+    access_token = tokens.get('access_token')
+    page_id = tokens.get('page_id')
+    
+    if not page_id:
+        print(f"❌ [INTEGRATION-SERVICE] No Facebook Page ID found for user {post_request.user_id}")
+        raise HTTPException(status_code=400, detail="No Facebook Page found. Please ensure you have a Facebook Page connected.")
+    
+    print(f"✅ [INTEGRATION-SERVICE] Retrieved tokens from Firestore")
+    print(f"   ├─ Page ID: {page_id}")
+    print(f"   └─ Token: {access_token[:20]}...")
+    
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        try:
+            # Step 1: Decode base64 image
+            print("📍 [STEP 1] Decoding base64 image...")
+            image_binary = base64.b64decode(post_request.image_data)
+            print(f"   └─ Image binary size: {len(image_binary)} bytes")
             
-            if response.status_code == 401:
-                print(f"❌ [INTEGRATION-SERVICE] Token expired")
+            # Step 2: Determine file extension from MIME type
+            mime_to_ext = {
+                'image/jpeg': 'jpg',
+                'image/jpg': 'jpg',
+                'image/png': 'png',
+                'image/gif': 'gif',
+                'image/webp': 'webp',
+            }
+            ext = mime_to_ext.get(post_request.image_mime_type, 'jpg')
+            filename = f"upload.{ext}"
+            
+            # Step 3: Upload image to Facebook Page via Graph API
+            print(f"📍 [STEP 2] Posting to Facebook Page /{page_id}/photos...")
+            
+            # Use multipart form data for image upload
+            files = {
+                'source': (filename, image_binary, post_request.image_mime_type)
+            }
+            data = {
+                'message': post_request.content,
+                'access_token': access_token
+            }
+            
+            photo_response = await client.post(
+                f"https://graph.facebook.com/v21.0/{page_id}/photos",
+                files=files,
+                data=data
+            )
+            
+            if photo_response.status_code not in [200, 201]:
+                error_text = photo_response.text
+                print(f"❌ [STEP 2] Facebook photo post failed: {photo_response.status_code}")
+                print(f"   Response: {error_text}")
                 raise HTTPException(
-                    status_code=401, 
-                    detail="LinkedIn token expired. Please re-authenticate."
+                    status_code=500, 
+                    detail=f"Failed to post photo to Facebook: {error_text}"
                 )
             
-            response.raise_for_status()
-            result = response.json()
+            result = photo_response.json()
+            post_id = result.get("id", "unknown")
+            photo_id = result.get("post_id", post_id)
             
-            print(f"✅ [INTEGRATION-SERVICE] Post successful!")
+            print(f"✅ [STEP 2] Photo posted successfully!")
+            print(f"   ├─ Photo ID: {post_id}")
+            print(f"   └─ Post ID: {photo_id}")
             print("="*100 + "\n")
             
-            return result
+            return {
+                "success": True,
+                "post_id": photo_id,
+                "photo_id": post_id,
+                "message": "Photo posted to Facebook Page successfully"
+            }
             
         except httpx.HTTPStatusError as exc:
-            print(f"❌ [INTEGRATION-SERVICE] HTTP error from Agent Service: {exc.response.status_code}")
+            print(f"❌ [INTEGRATION-SERVICE] HTTP error: {exc.response.status_code}")
+            print(f"   Response: {exc.response.text}")
             if exc.response.status_code == 401:
-                raise HTTPException(
-                    status_code=401, 
-                    detail="LinkedIn token expired. Please re-authenticate."
-                )
+                raise HTTPException(status_code=401, detail="Facebook token expired. Please re-authenticate.")
             raise HTTPException(status_code=exc.response.status_code, detail=exc.response.text)
-        except httpx.RequestError as exc:
-            print(f"❌ [INTEGRATION-SERVICE] Connection error to Agent Service: {str(exc)}")
-            raise HTTPException(status_code=503, detail=f"Error connecting to Agent Service: {exc}")
+        except Exception as exc:
+            import traceback
+            print(f"❌ [INTEGRATION-SERVICE] Error posting with image: {type(exc).__name__}: {str(exc)}")
+            print(traceback.format_exc())
+            raise HTTPException(status_code=500, detail=f"Error posting to Facebook: {str(exc)}")
+
 
 @app.post("/api/integrations/linkedin/post-with-image")
 async def post_to_linkedin_with_image(post_request: PostWithImageRequest):
@@ -748,7 +860,7 @@ async def post_to_linkedin_with_image(post_request: PostWithImageRequest):
     linkedin_headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
-        "LinkedIn-Version": "202511",
+        "LinkedIn-Version": "202602",
         "X-Restli-Protocol-Version": "2.0.0"
     }
     
@@ -831,6 +943,7 @@ async def post_to_linkedin_with_image(post_request: PostWithImageRequest):
                 },
                 "content": {
                     "media": {
+                        "title": post_request.content[:50] if len(post_request.content) > 0 else "Image Post", 
                         "id": image_urn
                     }
                 }

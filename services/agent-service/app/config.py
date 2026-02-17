@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 # Load environment variables from project root .env file
 _project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.."))
 _env_path = os.path.join(_project_root, ".env")
-load_dotenv(_env_path)
+load_dotenv(_env_path, override=True)
 
 
 class OpenAIConfig:

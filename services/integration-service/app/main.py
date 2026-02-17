@@ -13,7 +13,10 @@ from dotenv import load_dotenv
 import sys
 
 # Load environment variables
-load_dotenv()
+load_dotenv(override=True)
+
+# Import limit service
+from .limit_service import check_user_limit
 
 # Add parent directory to path to import shared utilities
 # Go up from app/ -> integration-service/ -> services/ -> project root
@@ -569,6 +572,10 @@ async def linkedin_status(user_id: str = Header(..., alias="X-User-ID")):
 @app.post("/api/integrations/linkedin/post")
 async def post_to_linkedin(post_request: PostRequest):
     """Post content to LinkedIn using stored tokens via Agent Service"""
+    # Check post limit
+    if not await check_user_limit(post_request.user_id, db):
+        raise HTTPException(status_code=403, detail="Monthly post limit reached (Basic Plan). Upgrade to Pro for unlimited posts.")
+
     print("\n" + "="*100)
     print("📤 [INTEGRATION-SERVICE] LinkedIn Post Request Received")
     print("="*100)
@@ -636,6 +643,10 @@ async def post_to_linkedin_with_image(post_request: PostWithImageRequest):
     2. Upload decoded image to uploadUrl  
     3. Create post with imageURN
     """
+    # Check post limit
+    if not await check_user_limit(post_request.user_id, db):
+        raise HTTPException(status_code=403, detail="Monthly post limit reached (Basic Plan). Upgrade to Pro for unlimited posts.")
+
     print("\n" + "="*100)
     print("🖼️ [INTEGRATION-SERVICE] LinkedIn Post WITH IMAGE Request")
     print("="*100)
@@ -1000,6 +1011,10 @@ async def twitter_status(user_id: str = Header(..., alias="X-User-ID")):
 @app.post("/api/integrations/twitter/post")
 async def post_to_twitter(post_request: PostRequest):
     """Post to Twitter via Agent Service"""
+    # Check post limit
+    if not await check_user_limit(post_request.user_id, db):
+        raise HTTPException(status_code=403, detail="Monthly post limit reached (Basic Plan). Upgrade to Pro for unlimited posts.")
+
     tokens = await get_user_tokens(post_request.user_id, 'twitter')
     
     if not tokens or not tokens.get('access_token'):
@@ -1242,6 +1257,10 @@ async def facebook_status(user_id: str = Header(..., alias="X-User-ID")):
 @app.post("/api/integrations/facebook/post")
 async def post_to_facebook(post_request: PostRequest):
     """Post content to Facebook using stored tokens via Agent Service"""
+    # Check post limit
+    if not await check_user_limit(post_request.user_id, db):
+        raise HTTPException(status_code=403, detail="Monthly post limit reached (Basic Plan). Upgrade to Pro for unlimited posts.")
+
     print("\n" + "="*100)
     print("📤 [INTEGRATION-SERVICE] Facebook Post Request Received")
     print("="*100)
@@ -1717,6 +1736,10 @@ async def disconnect_twitter(request: Request, user_id: str = Header(..., alias=
 @app.post("/api/integrations/twitter/post")
 async def post_to_twitter(post_request: PostRequest):
     """Post content to Twitter using stored tokens via Agent Service"""
+    # Check post limit
+    if not await check_user_limit(post_request.user_id, db):
+        raise HTTPException(status_code=403, detail="Monthly post limit reached (Basic Plan). Upgrade to Pro for unlimited posts.")
+
     print("\n" + "="*100)
     print("📤 [INTEGRATION-SERVICE] Twitter Post Request Received")
     print("="*100)

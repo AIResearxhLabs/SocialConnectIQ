@@ -14,7 +14,8 @@ import {
     collection,
     query,
     serverTimestamp,
-    orderBy
+    orderBy,
+    increment
 } from "firebase/firestore";
 import { aiService } from './api/ai';
 import { auth, db } from "./firebase";
@@ -4050,15 +4051,11 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
     const imageLoadedRef = useRef(false);
     const lastImageUrlRef = useRef(null);
 
+    const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+
     // Load initial data if provided (e.g. from Trending Topics)
     useEffect(() => {
         if (initialData) {
-            console.log("Loading initial data into composer:", initialData);
-
-            // 1. Load Text Content
-            if (initialData.content) setContent(initialData.content);
-
-            // 2. Load Platforms
             if (initialData.platforms) setSelectedPlatforms(initialData.platforms);
 
             // 3. Load AI Image - with guard to prevent duplicate loads
@@ -4544,7 +4541,7 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
 
         // Basic Plan Restriction: Monthly Post Limit
         if (userPlan === 'basic' && monthlyPostCount >= 14) {
-            setStatusMessage({ type: 'error', text: 'Basic plan limit reached (14 posts/month). Upgrade to Pro.' });
+            setStatusMessage({ type: 'error', text: 'Free trial for this month is completed. Plan will be renewed from next month on 1st.' });
             return;
         }
         // Pro Plan Restriction: Monthly Post Limit
@@ -4586,22 +4583,22 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
                 // Add other platforms as needed
             }
 
-            // Save to Firestore so it appears in calendar
+            // Save to Firestore (posts collection for immediate posts)
             if (db && userId) {
-                const path = `users/${userId}/scheduled_posts`;
+                const path = `users/${userId}/posts`;
                 const docRef = doc(collection(db, path));
 
                 await setDoc(docRef, {
                     content: content.trim(),
                     platforms: selectedPlatforms,
                     image: imageBase64 ? `data:${imageMimeType};base64,${imageBase64}` : null,
-                    scheduledTime: new Date(), // Posted now
+                    // removed scheduledTime as it's immediate
                     status: 'posted',
                     platformPostIds: platformPostIds,
                     createdAt: serverTimestamp(),
                     postedAt: serverTimestamp(),
                 });
-                console.log('✅ [COMPOSER] Saved to Firestore for calendar');
+                console.log('✅ [COMPOSER] Saved to Firestore posts collection');
             }
 
             // Update Usage Stats
@@ -4927,16 +4924,22 @@ const ComposerContent = ({ db, userId, platformConnections, addToast, addNotific
                                                     return (
                                                         <button
                                                             key={tone}
-                                                            onClick={() => !isLocked && setSelectedTone(tone)}
+                                                            onClick={() => {
+                                                                if (isLocked) {
+                                                                    setShowUpgradeModal(true);
+                                                                } else {
+                                                                    setSelectedTone(tone);
+                                                                }
+                                                            }}
                                                             className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors whitespace-nowrap flex items-center gap-1 ${selectedTone === tone
                                                                 ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 border-purple-300 dark:border-purple-600'
                                                                 : isLocked
-                                                                    ? 'bg-gray-100 dark:bg-gray-800 text-gray-400 border-gray-200 dark:border-gray-700 cursor-not-allowed opacity-60'
+                                                                    ? 'bg-gray-100 dark:bg-gray-800 text-gray-500 border-gray-200 dark:border-gray-700 cursor-pointer opacity-70 hover:bg-gray-200 dark:hover:bg-gray-700'
                                                                     : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-600'
                                                                 }`}
                                                         >
                                                             {tone}
-                                                            {isLocked && <Lock size={10} />}
+                                                            {isLocked && <Lock size={10} className="text-yellow-500" />}
                                                         </button>
                                                     )
                                                 })}
@@ -5285,7 +5288,7 @@ const App = () => {
     const updateUserUsage = useCallback((type) => {
         if (!db || !userId) return;
         const usageDocRef = doc(db, `users/${userId}/preferences/usage`);
-        const { increment } = require('firebase/firestore'); // Import locally to avoid top-level conflict if needed
+        // const { increment } = require('firebase/firestore'); // Removed require
 
         if (type === 'post') {
             setDoc(usageDocRef, { monthlyPostCount: increment(1) }, { merge: true });

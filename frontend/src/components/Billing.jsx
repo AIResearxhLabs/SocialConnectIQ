@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Check, X, Zap, Star, Briefcase } from 'lucide-react';
+import { Check, X, Zap, Star, Briefcase, AlertTriangle } from 'lucide-react';
 
 const Billing = ({ userPlan, monthlyPostCount, scheduledPostsCount }) => {
     const handleUpgrade = (planId) => {
@@ -130,6 +130,17 @@ const Billing = ({ userPlan, monthlyPostCount, scheduledPostsCount }) => {
                             </div>
                         </div>
                     </div>
+                    {monthlyPostCount >= 14 && (
+                        <div className="mt-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-start gap-3">
+                            <AlertTriangle className="w-5 h-5 text-red-600 dark:text-red-400 mt-0.5 flex-shrink-0" />
+                            <div>
+                                <h4 className="font-semibold text-red-700 dark:text-red-300">Monthly Limit Reached</h4>
+                                <p className="text-sm text-red-600 dark:text-red-400 mt-1">
+                                    Free trial for this month is completed. Plan will be renewed from next month on 1st.
+                                </p>
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
 

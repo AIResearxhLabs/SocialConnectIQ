@@ -1,73 +1,50 @@
 #!/usr/bin/env python3
 """
-Test script to verify OpenAI API key is loaded and working
+Simple Test Script for OpenAI API Key
+Verifies that the .env key is loaded correctly (overriding system envs)
 """
 import os
 import sys
 from dotenv import load_dotenv
 
-# Load .env file
-load_dotenv()
+# Load .env file with override=True to fix the system env conflict
+load_dotenv(override=True)
 
-print("=" * 80)
-print("🔑 OpenAI API Key Configuration Test")
-print("=" * 80)
+print("=" * 60)
+print("Testing OpenAI API Key Configuration")
+print("=" * 60)
 
 # Get the API key
 api_key = os.getenv("OPENAI_API_KEY", "")
 
-print(f"\n✅ .env file location: {os.path.abspath('.env')}")
-print(f"✅ .env file exists: {os.path.exists('.env')}")
-
-if api_key:
-    # Mask the key for security
-    if len(api_key) > 20:
-        masked_key = f"{api_key[:10]}...{api_key[-10:]}"
-    else:
-        masked_key = "***too short***"
-    
-    print(f"\n✅ OpenAI API Key Found")
-    print(f"   Length: {len(api_key)} characters")
-    print(f"   Masked: {masked_key}")
-    print(f"   Starts with: {api_key[:7]}")
-    
-    # Check if it's the old cached key
-    if api_key.startswith("sk-proj-") and "tJcA" in api_key:
-        print(f"\n❌ ERROR: This appears to be the OLD CACHED KEY!")
-        print(f"   This key is causing the 401 error")
-        sys.exit(1)
-    
-    # Test with OpenAI
-    print(f"\n🧪 Testing API key with OpenAI...")
-    try:
-        from openai import OpenAI
-        client = OpenAI(api_key=api_key)
-        
-        # Make a simple test call
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": "Say 'test successful' in 2 words"}],
-            max_tokens=10
-        )
-        
-        print(f"✅ OpenAI API Key is VALID and WORKING!")
-        print(f"   Response: {response.choices[0].message.content}")
-        
-    except Exception as e:
-        error_str = str(e)
-        print(f"\n❌ OpenAI API Test Failed:")
-        print(f"   Error: {error_str}")
-        
-        if "401" in error_str or "Incorrect API key" in error_str:
-            print(f"\n🔍 This is an AUTHENTICATION ERROR")
-            print(f"   The API key in .env might be invalid or expired")
-        
-        sys.exit(1)
-else:
-    print(f"\n❌ ERROR: No OpenAI API Key found in environment!")
-    print(f"   Check OPENAI_API_KEY in .env file")
+if not api_key:
+    print("❌ ERROR: No OPENAI_API_KEY found.")
     sys.exit(1)
 
-print(f"\n" + "=" * 80)
-print(f"✅ All tests passed! OpenAI API key is configured correctly")
-print(f"=" * 80)
+# Mask the key for display
+masked_key = f"{api_key[:10]}...{api_key[-5:]}" if len(api_key) > 15 else "***"
+print(f"Loaded Key: {masked_key}")
+
+if "sk-proj-fh" not in api_key:
+    print("⚠️  WARNING: This does not look like your new key (starting with sk-proj-fh...)")
+    print("   Check if .env is being loaded correctly.")
+else:
+    print("✅ Key prefix matches your new key.")
+
+# Test connectivity
+print("\nTesting connectivity with OpenAI...")
+try:
+    from openai import OpenAI
+    client = OpenAI(api_key=api_key)
+    
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": "Hello"}],
+        max_tokens=5
+    )
+    print(f"✅ SUCCESS! API call worked.")
+    print(f"Response: {response.choices[0].message.content}")
+
+except Exception as e:
+    print(f"❌ API Call Failed: {e}")
+    sys.exit(1)

@@ -18,10 +18,14 @@ aiohttp>=3.11.0
 # Configuration and environment
 python-dotenv>=1.0.0
 pyyaml>=6.0.1
+firebase-admin>=6.1.0
+pytz>=2023.3
 
 # Utilities
 python-json-logger>=2.0.7
 tenacity>=9.0.0
+beautifulsoup4>=4.12.0
+googlenewsdecoder>=0.1.0
 
 # Monitoring and observability
 prometheus-client>=0.21.0

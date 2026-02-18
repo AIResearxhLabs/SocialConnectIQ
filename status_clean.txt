@@ -1,0 +1,17 @@
+ M backend-service/app/config.py
+ M frontend/src/App.jsx
+ M frontend/src/components/Billing.jsx
+ M services/agent-service/app/config.py
+ M services/analytics-service/app/platform_analytics.py
+ M services/integration-service/app/main.py
+ M services/scheduling-service/app/main.py
+ M test-openai-key.py
+?? check_system_env.py
+?? debug_output.txt
+?? debug_output_ascii.txt
+?? list_modified.py
+?? services/integration-service/app/limit_service.py
+?? status.txt
+?? status_clean.txt
+?? temp_test_output.txt
+?? verify_config_load.py

@@ -79,7 +79,8 @@ class ContentRefinementAgent:
         tone: Optional[str] = None,
         platform: Optional[str] = None,
         refinement_instructions: Optional[str] = None,
-        generate_alternatives: bool = False
+        generate_alternatives: bool = False,
+        business_context: Optional[Dict] = None
     ) -> Dict[str, Any]:
         """
         Refine content using LLM
@@ -106,7 +107,7 @@ class ContentRefinementAgent:
         
         try:
             # Build system prompt
-            system_prompt = self._build_system_prompt(tone, platform)
+            system_prompt = self._build_system_prompt(tone, platform, business_context)
             
             # Build user prompt
             user_prompt = self._build_user_prompt(
@@ -190,7 +191,8 @@ class ContentRefinementAgent:
     def _build_system_prompt(
         self,
         tone: Optional[str],
-        platform: Optional[str]
+        platform: Optional[str],
+        business_context: Optional[Dict] = None
     ) -> str:
         """Build system prompt for LLM"""
         
@@ -206,11 +208,22 @@ Guidelines:
 4. Make the content more engaging and impactful
 5. Keep it concise yet meaningful"""
         
+        # Add business context if available
+        if business_context:
+            biz_name = business_context.get('businessName', '')
+            biz_category = business_context.get('category', '')
+            biz_audience = business_context.get('targetAudience', '')
+            system_prompt += f"""
+6. BUSINESS CONTEXT: You are writing for {biz_name}, a company in the {biz_category} industry.
+   Their target audience is: {biz_audience}
+   Ensure content aligns with their brand voice and appeals to their specific audience."""
+        
         # Add platform-specific guidelines
         if platform and platform in self.platform_limits:
             limits = self.platform_limits[platform]
+            next_num = 7 if business_context else 6
             system_prompt += f"""
-6. Platform: {platform.title()}
+{next_num}. Platform: {platform.title()}
    - Optimal length: {limits['optimal_length']} characters
    - Maximum length: {limits['max_length']} characters
    - Best practices: {', '.join(limits['best_practices'])}"""

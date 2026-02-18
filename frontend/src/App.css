@@ -1,38 +1,212 @@
-.App {
-  text-align: center;
+/* SocialConnectIQ Theme Styling - Clean Version */
+
+/* ======================================
+   BASE STYLES & SCROLLBAR
+   ====================================== */
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-.App-logo {
-  height: 40vmin;
-  pointer-events: none;
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 20s linear;
-  }
+::-webkit-scrollbar-track {
+  background: transparent;
 }
 
-.App-header {
-  background-color: #282c34;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  font-size: calc(10px + 2vmin);
-  color: white;
+::-webkit-scrollbar-thumb {
+  background: rgba(156, 163, 175, 0.5);
+  border-radius: 10px;
 }
 
-.App-link {
-  color: #61dafb;
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(156, 163, 175, 0.7);
 }
 
-@keyframes App-logo-spin {
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.4);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.6);
+}
+
+/* ======================================
+   BUTTON ENHANCEMENTS
+   ====================================== */
+
+/* Primary blue buttons - gradient effect */
+button.bg-blue-600,
+.bg-blue-600 {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%) !important;
+  box-shadow: 0 4px 14px rgba(59, 130, 246, 0.35);
+  transition: all 0.2s ease;
+}
+
+button.bg-blue-600:hover,
+.bg-blue-600:hover {
+  box-shadow: 0 6px 20px rgba(59, 130, 246, 0.45);
+  transform: translateY(-1px);
+}
+
+/* Success green buttons */
+.bg-green-600 {
+  background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%) !important;
+  box-shadow: 0 4px 14px rgba(34, 197, 94, 0.3);
+}
+
+/* Danger red buttons */
+.bg-red-500 {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%) !important;
+  box-shadow: 0 4px 14px rgba(239, 68, 68, 0.3);
+}
+
+/* ======================================
+   CARD ENHANCEMENTS
+   ====================================== */
+
+/* Enhanced shadows for cards */
+.shadow-2xl {
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.08), 0 2px 10px rgba(0, 0, 0, 0.04) !important;
+}
+
+.dark .shadow-2xl {
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4), 0 0 20px rgba(59, 130, 246, 0.08) !important;
+}
+
+.shadow-lg {
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.06), 0 2px 6px rgba(0, 0, 0, 0.03) !important;
+}
+
+.dark .shadow-lg {
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35), 0 0 10px rgba(59, 130, 246, 0.05) !important;
+}
+
+/* ======================================
+   DARK MODE ENHANCEMENTS
+   ====================================== */
+
+/* Subtle glow on dark mode sidebar */
+.dark aside {
+  border-right: 1px solid rgba(59, 130, 246, 0.1) !important;
+}
+
+/* Glassmorphism effect on dark cards */
+.dark .rounded-xl {
+  backdrop-filter: blur(10px);
+}
+
+/* Subtle glow on active sidebar item */
+.dark nav button.bg-blue-600 {
+  box-shadow: 0 4px 15px rgba(59, 130, 246, 0.4) !important;
+}
+
+/* Platform badge glows in dark mode */
+.dark .rounded-full.bg-blue-600 {
+  box-shadow: 0 2px 10px rgba(59, 130, 246, 0.5);
+}
+
+.dark .rounded-full.bg-pink-600 {
+  box-shadow: 0 2px 10px rgba(219, 39, 119, 0.5);
+}
+
+.dark .rounded-full.bg-green-500 {
+  box-shadow: 0 2px 10px rgba(34, 197, 94, 0.5);
+}
+
+.dark .rounded-full.bg-sky-500 {
+  box-shadow: 0 2px 10px rgba(14, 165, 233, 0.5);
+}
+
+/* ======================================
+   INPUT STYLING
+   ====================================== */
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2);
+}
+
+.dark input:focus,
+.dark select:focus,
+.dark textarea:focus {
+  box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.25);
+}
+
+/* ======================================
+   CONNECTION STATUS STYLING
+   ====================================== */
+
+/* Connected status glow */
+.dark .text-green-600,
+.dark .text-green-400 {
+  text-shadow: 0 0 8px rgba(34, 197, 94, 0.4);
+}
+
+/* ======================================
+   HOVER EFFECTS
+   ====================================== */
+
+/* Card hover lift effect */
+.hover\:scale-\[1\.02\]:hover {
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.1) !important;
+}
+
+.dark .hover\:scale-\[1\.02\]:hover {
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3), 0 0 15px rgba(59, 130, 246, 0.1) !important;
+}
+
+/* ======================================
+   ANIMATIONS
+   ====================================== */
+
+@keyframes fadeIn {
   from {
-    transform: rotate(0deg);
+    opacity: 0;
+    transform: translateY(8px);
   }
+
   to {
-    transform: rotate(360deg);
+    opacity: 1;
+    transform: translateY(0);
   }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.25s ease-out;
+}
+
+/* Smooth page transitions */
+main>div {
+  animation: fadeIn 0.25s ease-out;
+}
+
+/* ======================================
+   TOPBAR & SIDEBAR POLISH
+   ====================================== */
+
+/* Header blur effect */
+header {
+  backdrop-filter: blur(10px);
+}
+
+.dark header {
+  background: rgba(17, 24, 39, 0.9) !important;
+}
+
+/* Sidebar hover states */
+nav button {
+  transition: all 0.15s ease;
+}
+
+nav button:hover {
+  transform: translateX(2px);
 }

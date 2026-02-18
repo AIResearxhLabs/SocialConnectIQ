@@ -86,7 +86,19 @@ class ServiceManager:
             
             print(f"{Fore.YELLOW}🛑 Stopping {service_name} on port {port} (PID: {pid}, Process: {process_name}){Style.RESET_ALL}")
             
-            # Try graceful termination first
+            # Kill child processes first (uvicorn workers)
+            children = process.children(recursive=True)
+            for child in children:
+                try:
+                    child.terminate()
+                except psutil.NoSuchProcess:
+                    pass
+            
+            # Wait for children to terminate
+            if children:
+                psutil.wait_procs(children, timeout=3)
+            
+            # Try graceful termination of parent
             process.terminate()
             
             # Wait up to 5 seconds for graceful shutdown
@@ -163,7 +175,7 @@ class ServiceManager:
             print(f"{Fore.YELLOW}⚠️  No requirements.txt found at {requirements_file}{Style.RESET_ALL}")
             return False
         
-        print(f"{Fore.CYAN}📦 Installing dependencies from {requirements_file.name}...{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}📦 Checking dependencies from {requirements_file.name}...{Style.RESET_ALL}")
         
         try:
             subprocess.run(

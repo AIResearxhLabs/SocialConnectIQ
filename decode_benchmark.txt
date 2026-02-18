@@ -1,0 +1,13 @@
+Got 30 URLs
+
+--- 5 concurrent workers ---
+  TOTAL: 29.5s | OK: 30/30 | avg=4.7s min=4.1s max=6.1s
+
+--- 10 concurrent workers ---
+  TOTAL: 18.2s | OK: 30/30 | avg=5.7s min=4.7s max=6.4s
+
+--- 15 concurrent workers ---
+  TOTAL: 15.3s | OK: 30/30 | avg=7.2s min=5.5s max=8.0s
+
+--- 30 concurrent workers ---
+  TOTAL: 13.3s | OK: 30/30 | avg=12.6s min=10.5s max=13.3s
